@@ -1,0 +1,13 @@
+Run failed at 2026-02-27 14:03:37
+
+Traceback (most recent call last):
+  File "C:\Users\hamme\Desktop\APRS MAP TOOLS\Viewshed V2\aprs_viewshed_utah_parallel.py", line 2428, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\hamme\Desktop\APRS MAP TOOLS\Viewshed V2\aprs_viewshed_utah_parallel.py", line 2248, in main
+    dem_path = prepare_dem(stations, cfg, work_dir)
+  File "C:\Users\hamme\Desktop\APRS MAP TOOLS\Viewshed V2\aprs_viewshed_utah_parallel.py", line 1085, in prepare_dem
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: No DEM tiles found in 'C:\Users\hamme\Desktop\APRS MAP TOOLS\Viewshed V2\dem_cache'.  Expected files like n41w114.tif (1-deg x 1-deg NAD83 tiles).
