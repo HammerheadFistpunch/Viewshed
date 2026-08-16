@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Iterable
@@ -14,6 +15,8 @@ SOURCE_BASE_SCORES = {
     "cache": 65,
     "unknown": 55,
 }
+
+USER_OVERRIDE_ENV = "VIEWSHED_LOCATION_OVERRIDE_PATH"
 
 
 def _normalize_call(value: object) -> str:
@@ -32,6 +35,25 @@ def load_location_registry(path: Path) -> dict[str, dict]:
     if not isinstance(entries, dict):
         return {}
     return {_normalize_call(k): dict(v) for k, v in entries.items() if isinstance(v, dict)}
+
+
+def _effective_registry(registry_path: Path) -> dict[str, dict]:
+    """Merge packaged defaults with a user-writable registry when configured.
+
+    The packaged registry is loaded first. A path supplied through
+    VIEWSHED_LOCATION_OVERRIDE_PATH is loaded second and wins on callsign
+    collisions. This lets reviewed UI corrections survive executable upgrades.
+    """
+    merged = load_location_registry(registry_path)
+    user_path = str(os.environ.get(USER_OVERRIDE_ENV) or "").strip()
+    if user_path:
+        try:
+            candidate = Path(user_path).expanduser()
+            if candidate.resolve() != registry_path.resolve():
+                merged.update(load_location_registry(candidate))
+        except Exception:
+            pass
+    return merged
 
 
 def _source_name(record: dict) -> str:
@@ -96,9 +118,9 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
 
     Raw/reporting coordinates are always preserved as _reported_lat/_reported_lon.
     Candidate corrections never change coordinates; they only lower confidence and
-    add review metadata.  This keeps data-quality decisions outside propagation math.
+    add review metadata. This keeps data-quality decisions outside propagation math.
     """
-    registry = load_location_registry(registry_path)
+    registry = _effective_registry(registry_path)
     now = time.time()
     assessed: list[dict] = []
 
