@@ -3,7 +3,7 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = []
-for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL"):
+for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapview"):
     hiddenimports += collect_submodules(package)
 
 datas = [
@@ -18,7 +18,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=hiddenimports + ["aprs_viewshed_utah_parallel"],
+    hiddenimports=hiddenimports + ["aprs_viewshed_utah_parallel", "map_workspace"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
