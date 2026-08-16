@@ -1,53 +1,53 @@
 # Viewshed
 
-Viewshed is becoming a portable, one-click APRS RF coverage generator. The intended user workflow is simple: choose an area, click **Generate Viewshed**, and receive Google Earth KMZ and GeoTIFF coverage outputs without manually running the scraper, DEM tools, or propagation scripts.
+Viewshed is a portable APRS RF coverage generator built around a shared terrain/propagation foundation. The desktop application now uses a map-first workflow for Area, Station, Custom/future-station, and station-location correction tasks.
 
-## Current application milestone (v0.1)
+## Current application direction
 
-The repository now contains the first application shell around the existing propagation engine:
+The application is being developed around these principles:
 
-- Tkinter GUI (`viewshed_app.py`)
-- center-point + radius search area
-- configurable maximum propagation radius
-- digipeater / iGate filtering
-- propagation-aware station selection (search area plus RF buffer)
-- automatic DEM download and caching through the existing engine
-- parallel ITM Longley-Rice viewshed calculation
-- KMZ and GeoTIFF output
-- deterministic per-job output folders
-- PyInstaller configuration for a single Windows executable
-- GitHub Actions build that produces a `Viewshed.exe` artifact on every push to `main`
+- one common DEM -> terrain profile -> ITM/Longley-Rice -> path loss -> link-margin pipeline
+- Area, Station, and Custom modes differ by explicit site/radio inputs rather than hidden changes to propagation math
+- APRS station acquisition is live-first with optional cache, aprs.fi resolution, and seed/fallback data
+- station-location confidence and reviewed corrections are kept outside the RF math
+- large DEM requests are memory-bounded rather than requiring a full native mosaic in RAM
+- Windows packaging remains a single portable executable with `ViewshedData` used for persistent cache, jobs, seeds, settings, and user corrections
 
-The existing Utah station dataset is bundled as the default station source for v0.1. The GUI can also browse to another compatible JSON dataset. Automatic general-purpose station discovery is the next major data-source milestone.
+## Current UI modes
 
-## User workflow
+### Area
 
-1. Run `Viewshed.exe` (or `run_viewshed.bat` when developing from source).
-2. Enter a center latitude, longitude, and output radius.
-3. Choose the maximum RF propagation radius and station types.
-4. Click **Generate Viewshed**.
-5. The application selects stations that can affect the requested area, downloads/reuses elevation data, computes viewsheds, and writes the results.
+Choose an area on the map, acquire the station list first, inspect/correct questionable station locations, then run propagation on the reviewed/frozen station set.
 
-Outputs are written under a portable `ViewshedData/jobs/<timestamp>/output/` directory next to the executable when that location is writable. If it is not writable, the application falls back to `~/ViewshedData`.
+### Station
 
-Primary outputs:
+Select one known digi/iGate and run the same propagation engine for that individual site.
 
-- `viewshed.kmz` — Google Earth visualization
-- `coverage_count.tif` — combined coverage-count GeoTIFF
+### Custom
 
-Intermediate DEM and station viewshed files live under the job's `output/work/` directory. Reusable DEM downloads are kept in `ViewshedData/cache/dem/`.
+Click a proposed site on the map and supply explicit radio parameters such as antenna height, power, gain, frequency, and analysis radius.
 
-## Area semantics
+### Corrections
 
-The **output radius** describes the area the user cares about. Station selection uses a larger acquisition radius:
+Compare the reported and model coordinates for a station, visually propose a replacement location, save it as a review candidate, or approve it as a reviewed correction. Reviewed corrections change the model coordinate while preserving the originally reported position and provenance.
+
+## Station acquisition and seed data
+
+Normal Area discovery does not require a seed file, APRS callsign, or aprs.fi API key. Viewshed can connect receive-only to APRS-IS and use live infrastructure/position observations. Optional cache, aprs.fi resolution, and local seed files improve continuity and completeness.
+
+A built-in **Build Seed...** tool can perform a longer APRS collection session and save a reusable JSON seed under `ViewshedData/seeds/`.
+
+See [station acquisition](docs/station-acquisition.md) for more detail.
+
+## Outputs
+
+Job outputs are written under:
 
 ```text
-station search radius = output radius + maximum propagation radius
+ViewshedData/jobs/<timestamp>/output/
 ```
 
-This prevents a transmitter just outside the selected area from being excluded even though its RF footprint reaches into the selected area.
-
-At the v0.1 milestone, the legacy backend still creates the complete coverage footprint for the selected stations rather than cropping every product to the user's output circle. Exact output clipping is planned as the generalized engine is migrated out of the Utah prototype.
+Current primary products include Google Earth KMZ and GeoTIFF coverage data. The current roadmap calls for simplifying the default visualization from a continuous heatmap toward categorical coverage and infrastructure-overlap products while retaining raw link-margin data for technical use.
 
 ## Run from source
 
@@ -64,7 +64,7 @@ Or double-click:
 run_viewshed.bat
 ```
 
-The old direct backend remains in `aprs_viewshed_utah_parallel.py` for development and regression comparison, but it is no longer the intended user entry point.
+The legacy backend remains in `aprs_viewshed_utah_parallel.py` for regression comparison while propagation responsibilities continue to be migrated into focused modules.
 
 ## Build the Windows executable
 
@@ -86,11 +86,11 @@ A lightweight packaged smoke test is available:
 Viewshed.exe --self-test
 ```
 
-GitHub Actions performs the same build and smoke test on Windows and uploads the executable as the `Viewshed-Windows` artifact.
+GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Viewshed-Windows` artifact.
 
 ## Station JSON format
 
-The application currently accepts the same station records used by the prototype. A source can be a JSON list or an object containing a `stations`, `results`, or `data` list. Each usable record needs at least:
+Viewshed accepts a JSON list or an object containing a `stations`, `results`, or `data` list. Each usable record needs at least:
 
 ```json
 {
@@ -105,34 +105,37 @@ The application currently accepts the same station records used by the prototype
 
 ## Architecture direction
 
-The application is being migrated toward these boundaries:
-
 ```text
-GUI / CLI
-   |
+Map-first GUI / CLI
+       |
 Region + job controller
-   |
-Station source  -> station cache/filter
-   |
-Terrain source  -> DEM cache
-   |
+       |
+Station source -> confidence/corrections -> frozen station set
+       |
+Terrain source -> DEM/cache -> memory-bounded analysis DEM
+       |
 Propagation engine
-   |
+       |
 KMZ / GeoTIFF exporters
 ```
 
-`viewshed_core.py` now owns the region, job, station-filtering, portable-data, and worker-controller responsibilities. The large Utah prototype remains the propagation backend temporarily so the working ITM/raster implementation can be migrated incrementally rather than rewritten all at once.
+`viewshed_core.py` owns region/job/station filtering, portable data locations, correction registry integration, and worker-controller responsibilities. The larger original propagation script remains the backend while its working ITM/raster implementation is migrated incrementally rather than rewritten all at once.
 
-## Near-term roadmap
+## Roadmap
 
-1. Generalize the propagation backend beyond Utah-specific validation and UTM zone 12.
-2. Crop outputs to the requested region.
-3. Replace the bundled Utah-only station source with automatic regional station acquisition/cache.
-4. Add bounding-box area selection.
-5. Add a visual map area selector after the core geographic pipeline is stable.
-6. Move DEM, propagation, and export code into focused modules.
-7. Add automated unit/integration tests around region selection, DEM acquisition, and output generation.
+The active roadmap is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Scope
+Current priorities are:
 
-The project currently focuses only on **generating predicted viewshed / RF coverage data**. Historical KML/KMZ track comparison is intentionally out of scope for this application phase.
+1. Cancel a running propagation job.
+2. Improve completion/output actions in the UI.
+3. Replace or simplify the current heatmap with categorical coverage and overlap products.
+4. Add a topographic basemap for station corrections.
+5. Build the complete documentation set.
+6. Add an About / Help interface with documentation, dependency/license information, and special considerations.
+7. Reuse DEM data for elevation/hillshade assistance during corrections.
+8. Add terrain-based location plausibility warnings without automatically relocating stations.
+
+## Scope and modeling caution
+
+Viewshed generates predicted VHF coverage. APRS positions may be incomplete or wrong, station installation parameters are usually unknown, and Area/Station modes therefore use explicit reference assumptions rather than claiming exact station ERP/antenna data. Coverage should be treated as a planning/analysis prediction, not a communications guarantee.
