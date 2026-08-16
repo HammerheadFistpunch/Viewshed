@@ -128,9 +128,58 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
     raise RuntimeError(f"Could not download USGS 3DEP tile {tile_id.upper()}: {detail}")
 
 
+def _merge_resolution(tile_paths: list[Path], max_dimension: int) -> tuple[tuple[float, float] | None, dict]:
+    """Choose native resolution for normal jobs and a bounded resolution for huge mosaics."""
+    import rasterio
+
+    with rasterio.open(tile_paths[0]) as first:
+        xres = abs(float(first.res[0]))
+        yres = abs(float(first.res[1]))
+        nodata = float(first.nodata) if first.nodata is not None else -999999.0
+        crs = first.crs
+
+    left = float("inf")
+    bottom = float("inf")
+    right = float("-inf")
+    top = float("-inf")
+    for path in tile_paths:
+        with rasterio.open(path) as src:
+            left = min(left, src.bounds.left)
+            bottom = min(bottom, src.bounds.bottom)
+            right = max(right, src.bounds.right)
+            top = max(top, src.bounds.top)
+
+    native_width = max(1, int(math.ceil((right - left) / xres)))
+    native_height = max(1, int(math.ceil((top - bottom) / yres)))
+    longest = max(native_width, native_height)
+    if longest <= max_dimension:
+        return None, {
+            "native_width": native_width,
+            "native_height": native_height,
+            "output_width_est": native_width,
+            "output_height_est": native_height,
+            "scale": 1.0,
+            "nodata": nodata,
+            "crs": crs,
+        }
+
+    scale = longest / float(max_dimension)
+    target_res = (xres * scale, yres * scale)
+    output_width = max(1, int(math.ceil((right - left) / target_res[0])))
+    output_height = max(1, int(math.ceil((top - bottom) / target_res[1])))
+    return target_res, {
+        "native_width": native_width,
+        "native_height": native_height,
+        "output_width_est": output_width,
+        "output_height_est": output_height,
+        "scale": scale,
+        "nodata": nodata,
+        "crs": crs,
+    }
+
+
 def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
-    """Build the legacy engine's geographic DEM using current USGS 3DEP 1-arcsecond tiles."""
-    import numpy as np
+    """Build a memory-bounded geographic DEM using current USGS 3DEP tiles."""
     import rasterio
     from rasterio.crs import CRS
     from rasterio.merge import merge as rio_merge
@@ -194,43 +243,64 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
             tile_paths.append(future.result())
 
     tile_paths.sort()
-    print(f"   Merging {len(tile_paths)} tile(s) as BigTIFF...", end=" ", flush=True)
+    if not tile_paths:
+        raise RuntimeError("No DEM tiles were available for the requested area.")
+
+    max_merge_dimension = int(cfg.get("dem_merge_max_dimension", 8000))
+    max_merge_dimension = max(2000, min(max_merge_dimension, 16000))
+    merge_res, merge_info = _merge_resolution(tile_paths, max_merge_dimension)
+    nodata = float(merge_info["nodata"])
+    source_crs = merge_info["crs"] or CRS.from_epsg(4269)
+
+    native_width = int(merge_info["native_width"])
+    native_height = int(merge_info["native_height"])
+    output_width = int(merge_info["output_width_est"])
+    output_height = int(merge_info["output_height_est"])
+    estimated_native_gib = native_width * native_height * 4 / (1024 ** 3)
+
+    if merge_res is not None:
+        print(
+            f"   Large DEM guard: native mosaic would be {native_width}x{native_height} "
+            f"(~{estimated_native_gib:.1f} GiB float32)."
+        )
+        print(
+            f"   Merging directly to analysis-safe resolution: "
+            f"~{output_width}x{output_height} instead of materializing the full mosaic."
+        )
+
+    print(f"   Merging {len(tile_paths)} tile(s) as disk-backed BigTIFF...", end=" ", flush=True)
     started = time.perf_counter()
+    dem_path.unlink(missing_ok=True)
 
-    nodata = -999999.0
-    datasets = []
-    try:
-        for path in tile_paths:
-            src = rasterio.open(path)
-            if src.nodata is not None:
-                nodata = float(src.nodata)
-            datasets.append(src)
-        mosaic, mosaic_transform = rio_merge(datasets, nodata=nodata)
-        profile = datasets[0].profile.copy()
-    finally:
-        for src in datasets:
-            src.close()
-
-    profile.update(
-        driver="GTiff",
-        height=mosaic.shape[1],
-        width=mosaic.shape[2],
-        transform=mosaic_transform,
-        dtype="float32",
-        nodata=nodata,
-        compress="lzw",
-        count=1,
-        tiled=True,
-        blockxsize=512,
-        blockysize=512,
-        BIGTIFF="YES",
-    )
-    if not profile.get("crs"):
-        profile["crs"] = CRS.from_epsg(4269)
+    merge_kwargs = {
+        "nodata": nodata,
+        "dtype": "float32",
+        "mem_limit": 256,
+        "dst_path": dem_path,
+        "dst_kwds": {
+            "driver": "GTiff",
+            "dtype": "float32",
+            "nodata": nodata,
+            "compress": "lzw",
+            "count": 1,
+            "tiled": True,
+            "blockxsize": 512,
+            "blockysize": 512,
+            "BIGTIFF": "YES",
+        },
+    }
+    if merge_res is not None:
+        merge_kwargs["res"] = merge_res
+        merge_kwargs["target_aligned_pixels"] = True
 
     try:
-        with rasterio.open(dem_path, "w", **profile) as dst:
-            dst.write(mosaic[0].astype(np.float32), 1)
+        rio_merge(tile_paths, **merge_kwargs)
+        with rasterio.open(dem_path, "r+") as dst:
+            if not dst.crs:
+                dst.crs = source_crs
+            actual_width = dst.width
+            actual_height = dst.height
+            actual_crs = dst.crs or source_crs
     except Exception:
         dem_path.unlink(missing_ok=True)
         raise
@@ -245,14 +315,22 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
                 "lon_min": lon_min,
                 "lon_max": lon_max,
                 "nodata": nodata,
-                "crs": str(profile.get("crs") or "EPSG:4269"),
-                "resolution_arcsec": 1.0,
+                "crs": str(actual_crs),
+                "resolution_arcsec": 1.0 if merge_res is None else None,
                 "source": "USGS 3DEP current",
                 "bigtiff": True,
+                "disk_backed_merge": True,
+                "merge_mem_limit_mb": 256,
+                "native_estimated_width": native_width,
+                "native_estimated_height": native_height,
+                "output_width": actual_width,
+                "output_height": actual_height,
+                "adaptive_resolution": merge_res is not None,
+                "resolution_scale": float(merge_info["scale"]),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    print(f"done ({dem_path.stat().st_size / 1e6:.0f} MB, {time.perf_counter() - started:.1f}s)")
+    print(f"done ({actual_width}x{actual_height}, {dem_path.stat().st_size / 1e6:.0f} MB, {time.perf_counter() - started:.1f}s)")
     return dem_path
