@@ -13,6 +13,7 @@ from typing import Iterable
 from analysis_dem import prepare_analysis_dem
 from dem_sources import prepare_dem as prepare_usgs_dem
 from location_quality import assess_and_correct_locations, summarize_location_quality
+from osm_crossref import cross_reference_osm
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
@@ -154,6 +155,17 @@ def filter_stations(stations: Iterable[dict], region: Region, include_types: set
     return selected
 
 
+def _attach_osm_matches(records: list[dict], matches: dict[str, dict]) -> list[dict]:
+    attached: list[dict] = []
+    for original in records:
+        record = dict(original)
+        call = str(record.get("callsign") or "").strip().upper()
+        if call in matches:
+            record["_osm_crossref"] = dict(matches[call])
+        attached.append(record)
+    return attached
+
+
 def acquire_area_stations(
     region: Region,
     station_source: Path,
@@ -161,7 +173,7 @@ def acquire_area_stations(
     propagation_radius_km: float,
     refresh: bool = True,
 ) -> list[dict]:
-    """Acquire and quality-score stations without starting propagation math."""
+    """Acquire, OSM-correlate, and quality-score stations without RF math."""
     region.validate()
     acquisition_radius = region.radius_km + propagation_radius_km
     refresh_seconds = int(os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45"))
@@ -178,7 +190,23 @@ def acquire_area_stations(
         aprs_fi_api_key=os.environ.get("VIEWSHED_APRSFI_API_KEY", ""),
     )
     records = assess_station_locations(load_station_records(cache_path))
-    return filter_stations(records, region, include_types, propagation_radius_km)
+    selected = filter_stations(records, region, include_types, propagation_radius_km)
+
+    if selected:
+        try:
+            print(f"Cross-checking {len(selected)} selected station(s) against OpenStreetMap communications sites...")
+            matches = cross_reference_osm(selected, match_radius_km=3.0)
+            selected = assess_station_locations(_attach_osm_matches(selected, matches))
+            quality = summarize_location_quality(selected)
+            matched = sum(1 for match in matches.values() if match.get("matched"))
+            print(
+                f"OSM cross-check: {matched}/{len(matches)} matched within 3 km; "
+                f"{quality.get('OSM_AUTO', 0)} auto-corroborated within 150 m."
+            )
+        except Exception as exc:
+            print(f"OSM cross-check unavailable: {exc}. Continuing without OSM corroboration.")
+
+    return selected
 
 
 def prepare_job(
@@ -269,6 +297,7 @@ def run_legacy_worker(job_file: Path) -> Path:
         "Location confidence: "
         f"HIGH {quality['HIGH']}, MEDIUM {quality['MEDIUM']}, LOW {quality['LOW']}"
         f"; reviewed corrections {quality['CORRECTED']}; review candidates {quality['REVIEW']}"
+        f"; OSM auto-corroborated {quality.get('OSM_AUTO', 0)}"
     )
     print(f"Station acquisition selected {len(selected)} station(s).")
 
