@@ -23,6 +23,18 @@ from viewshed_core import (
 )
 
 
+def _configure_stdio_utf8() -> None:
+    """Keep packaged worker logging safe on Windows code pages."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def _settings_path() -> Path:
     return portable_data_root() / "settings.json"
 
@@ -211,13 +223,19 @@ class ViewshedApp(tk.Tk):
                 command = [sys.executable, "--worker", str(job_file)]
             else:
                 command = [sys.executable, str(Path(__file__).resolve()), "--worker", str(job_file)]
+            child_env = os.environ.copy()
+            child_env["PYTHONIOENCODING"] = "utf-8"
+            child_env["PYTHONUTF8"] = "1"
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 cwd=str(Path(job_file).parent),
+                env=child_env,
             )
             assert process.stdout is not None
             for line in process.stdout:
@@ -276,6 +294,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     multiprocessing.freeze_support()
+    _configure_stdio_utf8()
     args = parse_args()
     if args.self_test:
         print(self_test())
