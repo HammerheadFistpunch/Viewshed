@@ -8,3 +8,4 @@ requests>=2.31.0
 tqdm>=4.65.0
 scipy>=1.10.0
 aprslib>=0.7.2
+tkintermapview==1.30
