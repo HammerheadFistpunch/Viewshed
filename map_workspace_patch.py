@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import threading
 from tkinter import messagebox, ttk
 
 from map_workspace import ViewshedWorkspace as _ViewshedWorkspace, save_user_override
+from osm_crossref import cross_reference_osm
 from viewshed_core import assess_station_locations
 
 
@@ -10,11 +12,12 @@ class ViewshedWorkspace(_ViewshedWorkspace):
     """UI fixes layered over the map workspace while the UI is evolving."""
 
     def __init__(self, master, app) -> None:
-        # This flag must exist before the base constructor runs because the base
-        # constructor loads the station catalog and dispatches to our overridden
-        # _refresh_correction_catalog method.
+        # These flags must exist before the base constructor runs because the
+        # base constructor loads the station catalog and dispatches to our
+        # overridden _refresh_correction_catalog method.
         self._correction_show_all = False
         self._correction_catalog_source: list[dict] = []
+        self._osm_busy = False
         super().__init__(master, app)
         self._install_correction_map_controls()
         self._refresh_correction_catalog(self._correction_catalog_source or None)
@@ -30,6 +33,19 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         )
         self.review_filter_btn.pack(side="left")
         ttk.Button(controls, text="Next", command=self._next_correction).pack(side="left", padx=(4, 0))
+        self.osm_crosscheck_btn = ttk.Button(
+            controls,
+            text="Cross-check OSM",
+            command=self._crosscheck_osm,
+        )
+        self.osm_crosscheck_btn.pack(side="left", padx=(12, 0))
+        self.osm_use_btn = ttk.Button(
+            controls,
+            text="Use OSM point",
+            command=self._use_osm_point,
+            state="disabled",
+        )
+        self.osm_use_btn.pack(side="left", padx=(4, 0))
         ttk.Button(controls, text="Topo", command=self._use_topo_map).pack(side="left", padx=(12, 0))
         ttk.Button(controls, text="Standard", command=self._use_standard_map).pack(side="left", padx=(4, 0))
 
@@ -136,8 +152,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         if saved_call in current_calls:
             target_index = old_index + 1
         else:
-            # A reviewed station normally disappears from the default Needs
-            # Review queue. The station that followed it shifts into its index.
             target_index = max(0, old_index)
 
         if target_index >= len(current_calls):
@@ -159,6 +173,101 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             self.correct_call.set(call)
             self._correction_selected()
         self.notebook.select(self.corrections_tab)
+
+    def _crosscheck_osm(self) -> None:
+        if self._osm_busy:
+            return
+        visible_calls = list(self.correct_combo.cget("values") or ())
+        if not visible_calls:
+            messagebox.showinfo(
+                "OSM cross-check",
+                "There are no stations in the current correction filter. Use Show All to cross-check the full list.",
+                parent=self,
+            )
+            return
+        records = [
+            self._correction_records[call]
+            for call in visible_calls
+            if call in self._correction_records
+        ]
+        if not records:
+            return
+
+        self._osm_busy = True
+        self.osm_crosscheck_btn.configure(state="disabled")
+        self.correct_status.set(
+            f"Querying OpenStreetMap communications infrastructure for {len(records)} visible station(s)…"
+        )
+
+        def work() -> None:
+            try:
+                matches = cross_reference_osm(records, match_radius_km=3.0)
+                self.after(0, lambda: self._apply_osm_matches(matches))
+            except Exception as exc:
+                self.after(0, lambda e=exc: self._osm_crosscheck_failed(e))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_osm_matches(self, matches: dict[str, dict]) -> None:
+        self._osm_busy = False
+        self.osm_crosscheck_btn.configure(state="normal")
+        matched = sum(1 for m in matches.values() if m.get("matched"))
+
+        def attach(records: list[dict]) -> list[dict]:
+            updated: list[dict] = []
+            for original in records:
+                record = dict(original)
+                call = str(record.get("callsign") or "").strip().upper()
+                if call in matches:
+                    record["_osm_crossref"] = dict(matches[call])
+                updated.append(record)
+            return updated
+
+        self._correction_catalog_source = attach(self._correction_catalog_source)
+        if self._area_records:
+            self._area_records = attach(self._area_records)
+        for call, match in matches.items():
+            if call in self._station_records:
+                self._station_records[call] = {**self._station_records[call], "_osm_crossref": dict(match)}
+
+        selected = self.correct_call.get().strip().upper()
+        self._refresh_correction_catalog(self._correction_catalog_source)
+        if selected in self._correction_records:
+            self.correct_call.set(selected)
+            self._correction_selected()
+        self.correct_status.set(
+            f"OSM cross-check complete: {matched} of {len(matches)} station(s) have a communications feature within 3 km."
+        )
+
+    def _osm_crosscheck_failed(self, exc: Exception) -> None:
+        self._osm_busy = False
+        self.osm_crosscheck_btn.configure(state="normal")
+        self.correct_status.set("OSM cross-check unavailable.")
+        messagebox.showerror(
+            "OSM cross-check failed",
+            f"Could not query OpenStreetMap/Overpass:\n{exc}",
+            parent=self,
+        )
+
+    def _use_osm_point(self) -> None:
+        call = self.correct_call.get().strip().upper()
+        rec = self._correction_records.get(call)
+        match = (rec or {}).get("_osm_crossref") or {}
+        if not match.get("matched"):
+            messagebox.showinfo("No OSM match", "Cross-check OSM first; this station has no matched communications feature.", parent=self)
+            return
+        try:
+            lat = float(match["lat"])
+            lon = float(match["lon"])
+        except (KeyError, TypeError, ValueError):
+            return
+        self.correct_lat.set(f"{lat:.6f}")
+        self.correct_lon.set(f"{lon:.6f}")
+        distance_m = match.get("distance_m", "?")
+        label = str(match.get("label") or "communications site")
+        self.correct_reason.set(f"OSM communications feature {distance_m} m from reported/model point: {label}")
+        self.correct_source.set("OpenStreetMap via Overpass; human reviewed in Viewshed")
+        self._show_correction_proposal()
 
     def _use_topo_map(self) -> None:
         self.correction_map.set_tile_server(
@@ -195,6 +304,8 @@ class ViewshedWorkspace(_ViewshedWorkspace):
     def _correction_selected(self) -> None:
         rec = self._correction_records.get(self.correct_call.get().upper())
         self.correction_map.delete_all_marker()
+        if hasattr(self, "osm_use_btn"):
+            self.osm_use_btn.configure(state="disabled")
         if not rec:
             self.correct_info.set("No station selected")
             self.correct_lat.set("")
@@ -219,13 +330,57 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         conf = rec.get("_location_confidence") or {}
         reasons = conf.get("reasons") or []
         reason_text = "; ".join(str(r) for r in reasons)
+        freshness = conf.get("freshness") or {}
+        freshness_text = str(freshness.get("reason") or freshness.get("label") or "unknown")
+
+        osm = rec.get("_osm_crossref") or {}
+        if osm.get("matched"):
+            tags = osm.get("tags") or {}
+            service_bits = []
+            for key in (
+                "communication:radio",
+                "communication:microwave",
+                "communication:mobile_phone",
+                "communication:television",
+                "operator",
+                "height",
+            ):
+                if tags.get(key) not in (None, ""):
+                    service_bits.append(f"{key}={tags[key]}")
+            osm_text = (
+                f"{osm.get('strength','?')} — {osm.get('distance_m','?')} m to "
+                f"{osm.get('label','OSM communications site')}"
+            )
+            if service_bits:
+                osm_text += " (" + ", ".join(service_bits[:4]) + ")"
+            if hasattr(self, "osm_use_btn"):
+                self.osm_use_btn.configure(state="normal")
+        elif osm:
+            osm_text = f"No communications feature within {osm.get('radius_km', 3):g} km"
+        else:
+            osm_text = "Not checked"
+
         self.correct_info.set(
             f"Reported: {reported_lat:.6f}, {reported_lon:.6f}\n"
             f"Model: {model_lat:.6f}, {model_lon:.6f}\n"
-            f"Confidence: {conf.get('label','?')} ({conf.get('score','?')}/100)\n"
-            f"Why: {reason_text or 'No confidence details'}"
+            f"Location confidence: {conf.get('label','?')} ({conf.get('score','?')}/100)\n"
+            f"Why: {reason_text or 'No confidence details'}\n"
+            f"Freshness: {freshness_text}\n"
+            f"OSM cross-reference: {osm_text}"
         )
         self.correction_map.set_marker(reported_lat, reported_lon, text=f"{call} reported")
+
+        if osm.get("matched"):
+            try:
+                osm_lat = float(osm["lat"])
+                osm_lon = float(osm["lon"])
+                self.correction_map.set_marker(
+                    osm_lat,
+                    osm_lon,
+                    text=f"OSM: {osm.get('label','communications site')} ({osm.get('distance_m','?')} m)",
+                )
+            except (KeyError, TypeError, ValueError):
+                pass
 
         review = rec.get("_location_correction") or rec.get("_location_review_candidate") or {}
         candidate = self._coordinate_pair(review.get("candidate_lat"), review.get("candidate_lon"))
@@ -265,6 +420,16 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             )
             if reported:
                 self.correction_map.set_marker(reported[0], reported[1], text=f"{call} reported")
+            osm = rec.get("_osm_crossref") or {}
+            if osm.get("matched"):
+                try:
+                    self.correction_map.set_marker(
+                        float(osm["lat"]),
+                        float(osm["lon"]),
+                        text=f"OSM: {osm.get('label','communications site')} ({osm.get('distance_m','?')} m)",
+                    )
+                except (KeyError, TypeError, ValueError):
+                    pass
         self.correction_map.set_marker(lat, lon, text=f"{call or 'Station'} proposed")
         self.correct_lat.set(f"{lat:.6f}")
         self.correct_lon.set(f"{lon:.6f}")
