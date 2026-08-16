@@ -12,9 +12,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
     """UI fixes layered over the map workspace while the UI is evolving."""
 
     def __init__(self, master, app) -> None:
-        # These flags must exist before the base constructor runs because the
-        # base constructor loads the station catalog and dispatches to our
-        # overridden _refresh_correction_catalog method.
         self._correction_show_all = False
         self._correction_catalog_source: list[dict] = []
         self._osm_busy = False
@@ -27,23 +24,16 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         controls.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
 
         self.review_filter_btn = ttk.Button(
-            controls,
-            text="Show All",
-            command=self._toggle_correction_filter,
+            controls, text="Show All", command=self._toggle_correction_filter
         )
         self.review_filter_btn.pack(side="left")
         ttk.Button(controls, text="Next", command=self._next_correction).pack(side="left", padx=(4, 0))
         self.osm_crosscheck_btn = ttk.Button(
-            controls,
-            text="Cross-check OSM",
-            command=self._crosscheck_osm,
+            controls, text="Cross-check OSM", command=self._crosscheck_osm
         )
         self.osm_crosscheck_btn.pack(side="left", padx=(12, 0))
         self.osm_use_btn = ttk.Button(
-            controls,
-            text="Use OSM point",
-            command=self._use_osm_point,
-            state="disabled",
+            controls, text="Use OSM point", command=self._use_osm_point, state="disabled"
         )
         self.osm_use_btn.pack(side="left", padx=(4, 0))
         ttk.Button(controls, text="Topo", command=self._use_topo_map).pack(side="left", padx=(12, 0))
@@ -101,8 +91,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             key=lambda call: (self._confidence_score(self._correction_records[call]), call),
         )
         review_calls = [
-            call for call in all_calls
-            if self._needs_location_review(self._correction_records[call])
+            call for call in all_calls if self._needs_location_review(self._correction_records[call])
         ]
         visible_calls = all_calls if self._correction_show_all else review_calls
         self.correct_combo["values"] = visible_calls
@@ -138,10 +127,30 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
     def _advance_after_save(self, saved_call: str, previous_calls: list[str]) -> None:
         current_calls = list(self.correct_combo.cget("values") or ())
+
+        if not current_calls and not self._correction_show_all and self._correction_records:
+            # Finishing the Needs Review queue should not make the whole station
+            # catalog appear to disappear. Switch to Show All and leave the user
+            # on the reviewed station (or the first remaining station).
+            self._correction_show_all = True
+            self._update_filter_button()
+            all_calls = sorted(
+                self._correction_records,
+                key=lambda call: (self._confidence_score(self._correction_records[call]), call),
+            )
+            self.correct_combo["values"] = all_calls
+            target = saved_call if saved_call in all_calls else (all_calls[0] if all_calls else "")
+            self.correct_call.set(target)
+            self._correction_selected()
+            self.correct_status.set(
+                "Review queue complete — switched to Show All so the station catalog remains visible."
+            )
+            return
+
         if not current_calls:
             self.correct_call.set("")
             self._correction_selected()
-            self.correct_status.set("Review queue complete — no stations remain in this filter.")
+            self.correct_status.set("No stations remain in the current correction catalog.")
             return
 
         try:
@@ -155,8 +164,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             target_index = max(0, old_index)
 
         if target_index >= len(current_calls):
-            self.correct_status.set("Saved. End of the current correction list.")
-            return
+            target_index = len(current_calls) - 1
 
         self.correct_call.set(current_calls[target_index])
         self._correction_selected()
@@ -254,7 +262,11 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         rec = self._correction_records.get(call)
         match = (rec or {}).get("_osm_crossref") or {}
         if not match.get("matched"):
-            messagebox.showinfo("No OSM match", "Cross-check OSM first; this station has no matched communications feature.", parent=self)
+            messagebox.showinfo(
+                "No OSM match",
+                "Cross-check OSM first; this station has no matched communications feature.",
+                parent=self,
+            )
             return
         try:
             lat = float(match["lat"])
@@ -265,14 +277,15 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self.correct_lon.set(f"{lon:.6f}")
         distance_m = match.get("distance_m", "?")
         label = str(match.get("label") or "communications site")
-        self.correct_reason.set(f"OSM communications feature {distance_m} m from reported/model point: {label}")
+        self.correct_reason.set(
+            f"OSM communications feature {distance_m} m from reported/model point: {label}"
+        )
         self.correct_source.set("OpenStreetMap via Overpass; human reviewed in Viewshed")
         self._show_correction_proposal()
 
     def _use_topo_map(self) -> None:
         self.correction_map.set_tile_server(
-            "https://tile.opentopomap.org/{z}/{x}/{y}.png",
-            max_zoom=17,
+            "https://tile.opentopomap.org/{z}/{x}/{y}.png", max_zoom=17
         )
         if hasattr(self, "correction_attribution"):
             self.correction_attribution.configure(
@@ -281,15 +294,13 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
     def _use_standard_map(self) -> None:
         self.correction_map.set_tile_server(
-            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-            max_zoom=19,
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max_zoom=19
         )
         if hasattr(self, "correction_attribution"):
             self.correction_attribution.configure(text="Map data: © OpenStreetMap contributors")
 
     @staticmethod
     def _coordinate_pair(lat_value, lon_value):
-        """Return a validated numeric coordinate pair, or None for incomplete data."""
         try:
             if lat_value in (None, "") or lon_value in (None, ""):
                 return None
@@ -372,11 +383,9 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
         if osm.get("matched"):
             try:
-                osm_lat = float(osm["lat"])
-                osm_lon = float(osm["lon"])
                 self.correction_map.set_marker(
-                    osm_lat,
-                    osm_lon,
+                    float(osm["lat"]),
+                    float(osm["lon"]),
                     text=f"OSM: {osm.get('label','communications site')} ({osm.get('distance_m','?')} m)",
                 )
             except (KeyError, TypeError, ValueError):
@@ -398,7 +407,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self.correction_map.set_zoom(12)
 
     def _show_correction_proposal(self) -> None:
-        """Draw the working proposal without reloading and erasing its fields."""
         proposal = self._coordinate_pair(self.correct_lat.get().strip(), self.correct_lon.get().strip())
         if proposal is None:
             messagebox.showerror(
