@@ -38,12 +38,7 @@ def load_location_registry(path: Path) -> dict[str, dict]:
 
 
 def _effective_registry(registry_path: Path) -> dict[str, dict]:
-    """Merge packaged defaults with a user-writable registry when configured.
-
-    The packaged registry is loaded first. A path supplied through
-    VIEWSHED_LOCATION_OVERRIDE_PATH is loaded second and wins on callsign
-    collisions. This lets reviewed UI corrections survive executable upgrades.
-    """
+    """Merge packaged defaults with a user-writable registry when configured."""
     merged = load_location_registry(registry_path)
     user_path = str(os.environ.get(USER_OVERRIDE_ENV) or "").strip()
     if user_path:
@@ -95,13 +90,52 @@ def _position_freshness(record: dict, now: float) -> dict:
     return {"label": label, "age_days": age_days, "reason": reason}
 
 
-def _score_record(record: dict, registry_entry: dict | None) -> tuple[int, list[str]]:
-    """Score coordinate provenance, not station observation freshness.
+def _apply_osm_corroboration(record: dict, source: str, score: int, reasons: list[str]) -> tuple[int, list[str], dict]:
+    """Use OSM as corroborating evidence without relocating a station.
 
-    A missing or old timestamp says whether we know the station was observed
-    recently; by itself it does not say the reported latitude/longitude is wrong.
-    Freshness is tracked separately in _location_confidence["freshness"].
+    Strong agreement can promote an existing APRS/seed coordinate. A distant
+    OSM communications feature is treated as disagreement only for weak
+    provenance sources; authoritative live APRS/aprs.fi coordinates are not
+    downgraded merely because OSM may describe a different nearby site.
     """
+    osm = record.get("_osm_crossref") or {}
+    result = {"status": "NOT_CHECKED"}
+    if not osm:
+        return score, reasons, result
+    if not osm.get("matched"):
+        reasons.append("OSM: no communications feature found within search radius")
+        return score, reasons, {"status": "NO_MATCH", "radius_km": osm.get("radius_km")}
+
+    try:
+        distance_m = float(osm.get("distance_m"))
+    except (TypeError, ValueError):
+        return score, reasons, {"status": "INVALID_MATCH"}
+
+    result = {
+        "distance_m": int(round(distance_m)),
+        "strength": osm.get("strength"),
+        "label": osm.get("label"),
+    }
+
+    if distance_m <= 150:
+        score = max(score, 85)
+        reasons.append(f"OSM communications feature corroborates coordinate within {distance_m:.0f} m")
+        result["status"] = "AUTO_CORROBORATED"
+    elif distance_m <= 500:
+        score = max(score, 70)
+        reasons.append(f"OSM communications feature is plausibly nearby ({distance_m:.0f} m)")
+        result["status"] = "PROBABLE"
+    else:
+        reasons.append(f"OSM communications feature does not closely agree ({distance_m:.0f} m away)")
+        result["status"] = "DISAGREES"
+        if source in {"seed", "cache", "unknown"}:
+            score = min(score, 49)
+
+    return score, reasons, result
+
+
+def _score_record(record: dict, registry_entry: dict | None) -> tuple[int, list[str], dict]:
+    """Score coordinate provenance and independent corroboration, not freshness."""
     source = _source_name(record)
     score = SOURCE_BASE_SCORES.get(source, SOURCE_BASE_SCORES["unknown"])
     reasons = [f"coordinate source={source}"]
@@ -109,6 +143,8 @@ def _score_record(record: dict, registry_entry: dict | None) -> tuple[int, list[
     if record.get("_seed_only"):
         score = min(score, 65)
         reasons.append("seed-only coordinate; not confirmed by current live sample")
+
+    score, reasons, osm_validation = _apply_osm_corroboration(record, source, score, reasons)
 
     if registry_entry:
         status = str(registry_entry.get("status") or "candidate").lower()
@@ -119,7 +155,7 @@ def _score_record(record: dict, registry_entry: dict | None) -> tuple[int, list[
             score = min(score, 49)
             reasons.append("coordinate correction candidate requires review")
 
-    return max(0, min(100, int(round(score)))), reasons
+    return max(0, min(100, int(round(score)))), reasons, osm_validation
 
 
 def _label(score: int) -> str:
@@ -133,10 +169,9 @@ def _label(score: int) -> str:
 def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -> list[dict]:
     """Attach coordinate confidence/freshness and apply reviewed overrides only.
 
-    Raw/reporting coordinates are always preserved as _reported_lat/_reported_lon.
-    Candidate corrections never change coordinates; they only lower coordinate
-    confidence and add review metadata. Observation freshness is recorded
-    separately and never moves a station into the correction queue by itself.
+    OSM corroboration may increase confidence in the existing coordinate, but it
+    never moves the station. Candidate corrections never change propagation
+    coordinates until explicitly reviewed.
     """
     registry = _effective_registry(registry_path)
     now = time.time()
@@ -158,7 +193,7 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
             continue
 
         entry = registry.get(call)
-        score, reasons = _score_record(record, entry)
+        score, reasons, osm_validation = _score_record(record, entry)
         freshness = _position_freshness(record, now)
 
         if entry:
@@ -189,6 +224,7 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
             "reasons": reasons,
             "reported_source": _source_name(record),
             "freshness": freshness,
+            "osm_validation": osm_validation,
         }
         assessed.append(record)
 
@@ -196,7 +232,7 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
 
 
 def summarize_location_quality(records: Iterable[dict]) -> dict[str, int]:
-    summary = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "CORRECTED": 0, "REVIEW": 0}
+    summary = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "CORRECTED": 0, "REVIEW": 0, "OSM_AUTO": 0}
     for record in records:
         meta = record.get("_location_confidence") or {}
         label = str(meta.get("label") or "").upper()
@@ -206,4 +242,6 @@ def summarize_location_quality(records: Iterable[dict]) -> dict[str, int]:
             summary["CORRECTED"] += 1
         if record.get("_location_review_candidate"):
             summary["REVIEW"] += 1
+        if (meta.get("osm_validation") or {}).get("status") == "AUTO_CORROBORATED":
+            summary["OSM_AUTO"] += 1
     return summary
