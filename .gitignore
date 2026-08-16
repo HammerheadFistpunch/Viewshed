@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# IDE / editor state
+.vs/
+*.user
+*.suo
+
+# Runtime logs
+*.log
+/run_log.txt
+
+# Generated viewshed / DEM artifacts
+/dem_cache/
+/aprs_viewshed_work/
+/aprs_coverage_utah.kmz
+
+# OS metadata
+.DS_Store
+Thumbs.db
