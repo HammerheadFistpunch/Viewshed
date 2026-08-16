@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -16,7 +16,8 @@ from location_quality import assess_and_correct_locations, summarize_location_qu
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.6"
+APP_VERSION = "0.3.0"
+USER_OVERRIDE_ENV = "VIEWSHED_LOCATION_OVERRIDE_PATH"
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,9 @@ class JobConfig:
     propagation_radius_km: float
     job_dir: str
     filtered_stations: str
+    mode: str = "area"
+    frozen_stations: bool = False
+    radio_settings: dict = field(default_factory=dict)
 
     def to_json(self, path: Path) -> None:
         path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
@@ -50,6 +54,9 @@ class JobConfig:
     def from_json(cls, path: Path) -> "JobConfig":
         raw = json.loads(path.read_text(encoding="utf-8"))
         raw["region"] = Region(**raw["region"])
+        raw.setdefault("mode", "area")
+        raw.setdefault("frozen_stations", False)
+        raw.setdefault("radio_settings", {})
         return cls(**raw)
 
 
@@ -73,6 +80,41 @@ def portable_data_root() -> Path:
         fallback = Path.home() / "ViewshedData"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
+
+
+def user_override_path() -> Path:
+    env = os.environ.get(USER_OVERRIDE_ENV, "").strip()
+    return Path(env) if env else portable_data_root() / "station_location_overrides.json"
+
+
+def _read_registry(path: Path) -> dict:
+    if not path.exists():
+        return {"version": 1, "overrides": {}}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "overrides": {}}
+    if not isinstance(raw, dict):
+        raw = {}
+    entries = raw.get("overrides")
+    if not isinstance(entries, dict):
+        entries = {}
+    return {"version": 1, "overrides": entries}
+
+
+def combined_location_registry_path() -> Path:
+    packaged = _read_registry(resource_path("station_location_overrides.json"))
+    user = _read_registry(user_override_path())
+    merged = {"version": 1, "overrides": dict(packaged["overrides"])}
+    merged["overrides"].update(user["overrides"])
+    path = portable_data_root() / "cache" / "effective_station_location_overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    return path
+
+
+def assess_station_locations(records: Iterable[dict]) -> list[dict]:
+    return assess_and_correct_locations(records, combined_location_registry_path())
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -112,9 +154,46 @@ def filter_stations(stations: Iterable[dict], region: Region, include_types: set
     return selected
 
 
-def prepare_job(region: Region, station_source: Path, include_types: set[str], propagation_radius_km: float) -> tuple[JobConfig, Path]:
+def acquire_area_stations(
+    region: Region,
+    station_source: Path,
+    include_types: set[str],
+    propagation_radius_km: float,
+    refresh: bool = True,
+) -> list[dict]:
+    """Acquire and quality-score stations without starting propagation math."""
     region.validate()
-    if not station_source.exists():
+    acquisition_radius = region.radius_km + propagation_radius_km
+    refresh_seconds = int(os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45"))
+    refresh_seconds = max(0, min(refresh_seconds, 300))
+    cache_path = acquire_station_cache(
+        seed_path=station_source,
+        data_root=portable_data_root(),
+        center_lat=region.center_lat,
+        center_lon=region.center_lon,
+        acquisition_radius_km=acquisition_radius,
+        refresh=refresh,
+        refresh_seconds=refresh_seconds,
+        callsign=os.environ.get("VIEWSHED_APRS_CALLSIGN", ""),
+        aprs_fi_api_key=os.environ.get("VIEWSHED_APRSFI_API_KEY", ""),
+    )
+    records = assess_station_locations(load_station_records(cache_path))
+    return filter_stations(records, region, include_types, propagation_radius_km)
+
+
+def prepare_job(
+    region: Region,
+    station_source: Path,
+    include_types: set[str],
+    propagation_radius_km: float,
+    *,
+    mode: str = "area",
+    selected_records: list[dict] | None = None,
+    radio_settings: dict | None = None,
+    frozen_stations: bool = False,
+) -> tuple[JobConfig, Path]:
+    region.validate()
+    if not station_source.exists() and selected_records is None:
         raise FileNotFoundError(f"Station seed source not found: {station_source}")
     if not include_types:
         raise ValueError("Select at least one station type.")
@@ -127,8 +206,12 @@ def prepare_job(region: Region, station_source: Path, include_types: set[str], p
     work_dir = output_dir / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    seed_records = load_station_records(station_source)
-    selected = filter_stations(seed_records, region, include_types, propagation_radius_km)
+    if selected_records is None:
+        seed_records = load_station_records(station_source)
+        selected = filter_stations(seed_records, region, include_types, propagation_radius_km)
+    else:
+        selected = [dict(record) for record in selected_records]
+
     filtered = job_dir / "stations.json"
     filtered.write_text(json.dumps(selected, indent=2), encoding="utf-8")
 
@@ -139,62 +222,33 @@ def prepare_job(region: Region, station_source: Path, include_types: set[str], p
         propagation_radius_km=propagation_radius_km,
         job_dir=str(job_dir),
         filtered_stations=str(filtered),
+        mode=mode,
+        frozen_stations=frozen_stations or selected_records is not None,
+        radio_settings=dict(radio_settings or {}),
     )
     job_file = job_dir / "job.json"
     cfg.to_json(job_file)
     return cfg, job_file
 
 
-def _refresh_job_stations(job: JobConfig) -> list[dict]:
-    acquisition_radius = job.region.radius_km + job.propagation_radius_km
-    refresh_seconds = int(os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45"))
-    refresh_seconds = max(0, min(refresh_seconds, 300))
-    cache_path = acquire_station_cache(
-        seed_path=Path(job.station_source),
-        data_root=portable_data_root(),
-        center_lat=job.region.center_lat,
-        center_lon=job.region.center_lon,
-        acquisition_radius_km=acquisition_radius,
+def _job_stations(job: JobConfig) -> list[dict]:
+    if job.frozen_stations:
+        records = assess_station_locations(load_station_records(Path(job.filtered_stations)))
+        Path(job.filtered_stations).write_text(json.dumps(records, indent=2), encoding="utf-8")
+        return records
+    records = acquire_area_stations(
+        job.region,
+        Path(job.station_source),
+        set(job.include_types),
+        job.propagation_radius_km,
         refresh=True,
-        refresh_seconds=refresh_seconds,
-        callsign=os.environ.get("VIEWSHED_APRS_CALLSIGN", ""),
-        aprs_fi_api_key=os.environ.get("VIEWSHED_APRSFI_API_KEY", ""),
     )
-    stations = load_station_records(cache_path)
-    stations = assess_and_correct_locations(
-        stations,
-        resource_path("station_location_overrides.json"),
-    )
-    quality = summarize_location_quality(stations)
-    print(
-        "Location confidence: "
-        f"HIGH {quality['HIGH']}, MEDIUM {quality['MEDIUM']}, LOW {quality['LOW']}"
-        f"; reviewed corrections {quality['CORRECTED']}; review candidates {quality['REVIEW']}"
-    )
-    for station in stations:
-        if station.get("_location_correction"):
-            raw_lat = station.get("_reported_lat")
-            raw_lon = station.get("_reported_lon")
-            print(
-                f"Location correction: {station.get('callsign','?')} "
-                f"reported=({raw_lat}, {raw_lon}) -> "
-                f"model=({station.get('lat')}, {station.get('lon')})"
-            )
-        elif station.get("_location_review_candidate"):
-            confidence = station.get("_location_confidence") or {}
-            print(
-                f"Location review: {station.get('callsign','?')} "
-                f"confidence={confidence.get('label','LOW')} "
-                f"score={confidence.get('score','?')} (coordinate unchanged)"
-            )
-
-    selected = filter_stations(stations, job.region, set(job.include_types), job.propagation_radius_km)
-    Path(job.filtered_stations).write_text(json.dumps(selected, indent=2), encoding="utf-8")
-    return selected
+    Path(job.filtered_stations).write_text(json.dumps(records, indent=2), encoding="utf-8")
+    return records
 
 
 def run_legacy_worker(job_file: Path) -> Path:
-    """Run the proven propagation pipeline after refreshing the station cache."""
+    """Run the proven DEM + ITM pipeline for a prepared area/station/custom job."""
     job = JobConfig.from_json(job_file)
     job_dir = Path(job.job_dir)
     output_dir = job_dir / "output"
@@ -204,11 +258,18 @@ def run_legacy_worker(job_file: Path) -> Path:
 
     print(f"Viewshed {APP_VERSION}")
     print(f"Job: {job_dir}")
+    print(f"Mode: {job.mode}")
     print(f"Area: {job.region.center_lat:.5f}, {job.region.center_lon:.5f} radius {job.region.radius_km:.1f} km")
 
-    selected = _refresh_job_stations(job)
+    selected = _job_stations(job)
     if not selected:
-        raise RuntimeError("No digipeater/iGate positions were available for this area after checking the station cache and live APRS-IS.")
+        raise RuntimeError("No valid station positions were available for this job.")
+    quality = summarize_location_quality(selected)
+    print(
+        "Location confidence: "
+        f"HIGH {quality['HIGH']}, MEDIUM {quality['MEDIUM']}, LOW {quality['LOW']}"
+        f"; reviewed corrections {quality['CORRECTED']}; review candidates {quality['REVIEW']}"
+    )
     print(f"Station acquisition selected {len(selected)} station(s).")
 
     import aprs_viewshed_utah_parallel as engine
@@ -226,26 +287,22 @@ def run_legacy_worker(job_file: Path) -> Path:
         "cpu_workers": max(1, min(8, os.cpu_count() or 4)),
         "worker_dem_max_px": 2500,
         "coordinate_overrides": {},
-
-        # Reference radio system for map projection. Terrain/ITM loss is still
-        # calculated from the DEM; this value is an explicit operating
-        # assumption rather than claimed station-specific ERP/antenna data.
         "tx_power_dbm": 47.0,
         "tx_antenna_gain_dbd": 0.0,
         "rx_sensitivity_dbm": -119.0,
         "rx_antenna_gain_dbd": 2.0,
         "max_path_loss_db": 158.0,
-
-        # Render positive remaining link margin. The map therefore answers
-        # "how much reserve remains?" instead of using one binary 161 dB edge.
         "margin_display_floor_db": 0.0,
         "max_margin_db": 30.0,
     })
+    cfg.update(job.radio_settings)
 
-    print("Reference radio profile: 50 W VHF mobile / practical antenna")
-    print("Operational path-loss budget: 158 dB")
+    print(f"Frequency: {float(cfg.get('freq_mhz', 144.390)):.3f} MHz")
+    print(f"TX power: {float(cfg.get('tx_power_dbm', 47.0)):.1f} dBm")
+    print(f"TX antenna gain: {float(cfg.get('tx_antenna_gain_dbd', 0.0)):.1f} dBd")
+    print(f"TX antenna height: {float(cfg.get('antenna_height_digi_m', 20.0)):.1f} m AGL")
+    print(f"Operational path-loss budget: {float(cfg.get('max_path_loss_db', 158.0)):.1f} dB")
     print("Map metric: remaining link margin (0 dB = operational edge)")
-    print("Interpretation: 0-10 dB marginal, 10-20 dB good, 20+ dB strong")
 
     stations, colocation_map = engine.load_stations(job.filtered_stations, cfg)
     if not stations:
@@ -255,13 +312,7 @@ def run_legacy_worker(job_file: Path) -> Path:
     source_dem = prepare_usgs_dem(stations, cfg, work_dir)
     analysis_dem = prepare_analysis_dem(source_dem, work_dir, max_dimension=8000)
 
-    results = engine.compute_viewsheds(
-        stations,
-        analysis_dem,
-        cfg,
-        work_dir,
-        colocation_map=colocation_map,
-    )
+    results = engine.compute_viewsheds(stations, analysis_dem, cfg, work_dir, colocation_map=colocation_map)
     if not results:
         raise RuntimeError("The propagation engine produced no station viewsheds.")
 
@@ -278,11 +329,7 @@ def run_legacy_worker(job_file: Path) -> Path:
 
 def self_test() -> str:
     source = resource_path("utah_stations_scraped.json")
-    stations = load_station_records(source)
-    stations = assess_and_correct_locations(
-        stations,
-        resource_path("station_location_overrides.json"),
-    )
+    stations = assess_station_locations(load_station_records(source))
     region = Region(40.7608, -111.8910, 100.0)
     selected = filter_stations(stations, region, {"digi", "igate"}, 180.0)
     if not selected:
