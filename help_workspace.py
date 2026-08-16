@@ -26,7 +26,33 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
     def __init__(self, master, app) -> None:
         super().__init__(master, app)
+        self._clarify_range_labels()
         self._build_help_tab()
+
+    def _clarify_range_labels(self) -> None:
+        replacements = {
+            "Station coverage radius (km)": "Max calculation range (km)",
+            "Coverage radius (km)": "Max calculation range (km)",
+        }
+
+        def visit(widget) -> None:
+            try:
+                text = widget.cget("text")
+            except Exception:
+                text = None
+            if text in replacements:
+                try:
+                    widget.configure(text=replacements[text])
+                except Exception:
+                    pass
+            try:
+                children = widget.winfo_children()
+            except Exception:
+                children = []
+            for child in children:
+                visit(child)
+
+        visit(self)
 
     def _build_help_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=12)
