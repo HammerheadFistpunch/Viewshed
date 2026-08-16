@@ -30,7 +30,7 @@ def _configure_stdio_utf8() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
             try:
-                reconfigure(encoding="utf-8", errors="replace")
+                reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
             except (OSError, ValueError):
                 pass
 
@@ -60,8 +60,8 @@ class ViewshedApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Viewshed {APP_VERSION}")
-        self.geometry("780x730")
-        self.minsize(700, 620)
+        self.geometry("800x790")
+        self.minsize(720, 660)
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
         self._settings = _load_settings()
@@ -76,7 +76,7 @@ class ViewshedApp(tk.Tk):
         ttk.Label(
             outer,
             text="Choose an area. Viewshed refreshes/reuses APRS infrastructure data, acquires terrain, computes coverage, and exports KMZ + GeoTIFF.",
-            wraplength=720,
+            wraplength=740,
         ).pack(anchor="w", pady=(2, 14))
 
         area = ttk.LabelFrame(outer, text="Search area", padding=12)
@@ -92,7 +92,7 @@ class ViewshedApp(tk.Tk):
         ttk.Label(
             area,
             text="Stations are searched out to output radius + propagation radius so coverage crossing the area boundary is not missed.",
-            wraplength=670,
+            wraplength=690,
         ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         stations = ttk.LabelFrame(outer, text="Station acquisition", padding=12)
@@ -140,7 +140,7 @@ class ViewshedApp(tk.Tk):
         ttk.Label(
             stations,
             text="The area-aware station cache is reused for up to 6 hours. When stale or for a different area, APRS-IS is sampled live; aprs.fi is used only when a key is supplied.",
-            wraplength=690,
+            wraplength=710,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(outer)
@@ -151,9 +151,20 @@ class ViewshedApp(tk.Tk):
         self.open_btn.pack(side="left", padx=(8, 0))
         ttk.Label(actions, text=f"Data root: {portable_data_root()}").pack(side="right")
 
-        log_frame = ttk.LabelFrame(outer, text="Progress", padding=8)
-        log_frame.pack(fill="both", expand=True, pady=(12, 0))
-        self.log = tk.Text(log_frame, height=18, wrap="word", state="disabled")
+        status_frame = ttk.LabelFrame(outer, text="Job status", padding=10)
+        status_frame.pack(fill="x", pady=(12, 0))
+        self.status_var = tk.StringVar(value="Ready")
+        self.percent_var = tk.StringVar(value="0%")
+        status_row = ttk.Frame(status_frame)
+        status_row.pack(fill="x")
+        ttk.Label(status_row, textvariable=self.status_var).pack(side="left")
+        ttk.Label(status_row, textvariable=self.percent_var).pack(side="right")
+        self.progress = ttk.Progressbar(status_frame, orient="horizontal", mode="determinate", maximum=100)
+        self.progress.pack(fill="x", pady=(7, 0))
+
+        log_frame = ttk.LabelFrame(outer, text="Detailed progress", padding=8)
+        log_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.log = tk.Text(log_frame, height=16, wrap="word", state="disabled")
         scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         self.log.pack(side="left", fill="both", expand=True)
@@ -197,6 +208,34 @@ class ViewshedApp(tk.Tk):
         else:
             _settings_path().unlink(missing_ok=True)
 
+    def _set_progress(self, percent: int, status: str) -> None:
+        percent = max(0, min(100, percent))
+        self.progress["value"] = percent
+        self.percent_var.set(f"{percent}%")
+        self.status_var.set(status)
+
+    def _update_progress_from_log(self, line: str) -> None:
+        """Translate legacy worker messages into stable user-facing stages."""
+        text = line.strip()
+        if not text:
+            return
+
+        stages = (
+            (("Refreshing station cache", "Using cached station data", "Station cache:"), 8, "Step 1 of 6 — Acquiring APRS stations"),
+            (("Station acquisition selected", "Using "), 18, "Step 1 of 6 — Station list ready"),
+            (("DEM cache:", "Tiles required:", "Source: USGS"), 25, "Step 2 of 6 — Preparing elevation data"),
+            (("Downloading N", "Merging "), 35, "Step 2 of 6 — Downloading / assembling terrain"),
+            (("Building memory-bounded analysis DEM", "Analysis DEM ready", "Reprojecting DEM"), 48, "Step 3 of 6 — Preparing analysis terrain"),
+            (("Engine:", "Workers:", "DEM in shared memory"), 58, "Step 4 of 6 — Computing station viewsheds"),
+            (("stations resolved", "Merging viewshed", "Merging "), 78, "Step 5 of 6 — Combining coverage"),
+            (("Rendering coverage", "Building per-station PNGs", "Rendering KML", "Writing KMZ", "KMZ:"), 90, "Step 6 of 6 — Rendering and exporting results"),
+        )
+        for needles, percent, status in stages:
+            if any(needle in text for needle in needles):
+                if percent >= int(float(self.progress["value"])):
+                    self._set_progress(percent, status)
+                return
+
     def _generate(self) -> None:
         try:
             self._apply_station_settings()
@@ -214,6 +253,7 @@ class ViewshedApp(tk.Tk):
 
         self.generate_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
+        self._set_progress(2, "Starting viewshed job…")
         self._append_log(f"Starting job: {job_file.parent}\n")
         threading.Thread(target=self._run_job, args=(job_file,), daemon=True).start()
 
@@ -222,10 +262,11 @@ class ViewshedApp(tk.Tk):
             if getattr(sys, "frozen", False):
                 command = [sys.executable, "--worker", str(job_file)]
             else:
-                command = [sys.executable, str(Path(__file__).resolve()), "--worker", str(job_file)]
+                command = [sys.executable, "-u", str(Path(__file__).resolve()), "--worker", str(job_file)]
             child_env = os.environ.copy()
             child_env["PYTHONIOENCODING"] = "utf-8"
             child_env["PYTHONUTF8"] = "1"
+            child_env["PYTHONUNBUFFERED"] = "1"
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
@@ -253,14 +294,17 @@ class ViewshedApp(tk.Tk):
             while True:
                 kind, text = self._messages.get_nowait()
                 if kind == "log":
+                    self._update_progress_from_log(text)
                     self._append_log(text)
                 elif kind == "done":
                     self.generate_btn.configure(state="normal")
                     self.open_btn.configure(state="normal")
+                    self._set_progress(100, "Complete — outputs are ready")
                     self._append_log(f"\nComplete. Output: {text}\n")
                     messagebox.showinfo("Viewshed complete", f"Outputs are ready in:\n{text}")
                 elif kind == "error":
                     self.generate_btn.configure(state="normal")
+                    self.status_var.set("Failed — see detailed progress below")
                     self._append_log(f"\nERROR: {text}\n")
                     messagebox.showerror("Viewshed failed", text)
         except queue.Empty:
@@ -297,7 +341,7 @@ def main() -> int:
     _configure_stdio_utf8()
     args = parse_args()
     if args.self_test:
-        print(self_test())
+        print(self_test(), flush=True)
         return 0
     if args.worker:
         run_legacy_worker(args.worker)
