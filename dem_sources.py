@@ -83,7 +83,6 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
         if urls:
             break
 
-    # Current products are preferred. Historical URLs are retained only as fallbacks.
     return sorted(urls, key=lambda u: ("/current/" not in u.lower(), "/historical/" in u.lower()))
 
 
@@ -152,7 +151,6 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
     lon_min = min(lons) - margin_deg
     lon_max = max(lons) + margin_deg
 
-    # The current backend is CONUS/Utah-oriented and all longitudes are west.
     if lon_max >= 0:
         raise RuntimeError("The current DEM adapter expects western-hemisphere coordinates; generalized CRS support is still in progress.")
 
@@ -196,7 +194,7 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
             tile_paths.append(future.result())
 
     tile_paths.sort()
-    print(f"   Merging {len(tile_paths)} tile(s)...", end=" ", flush=True)
+    print(f"   Merging {len(tile_paths)} tile(s) as BigTIFF...", end=" ", flush=True)
     started = time.perf_counter()
 
     nodata = -999999.0
@@ -225,12 +223,17 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
         tiled=True,
         blockxsize=512,
         blockysize=512,
+        BIGTIFF="YES",
     )
     if not profile.get("crs"):
         profile["crs"] = CRS.from_epsg(4269)
 
-    with rasterio.open(dem_path, "w", **profile) as dst:
-        dst.write(mosaic[0].astype(np.float32), 1)
+    try:
+        with rasterio.open(dem_path, "w", **profile) as dst:
+            dst.write(mosaic[0].astype(np.float32), 1)
+    except Exception:
+        dem_path.unlink(missing_ok=True)
+        raise
 
     bounds_path.write_text(
         json.dumps(
@@ -245,6 +248,7 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
                 "crs": str(profile.get("crs") or "EPSG:4269"),
                 "resolution_arcsec": 1.0,
                 "source": "USGS 3DEP current",
+                "bigtiff": True,
             },
             indent=2,
         ),
