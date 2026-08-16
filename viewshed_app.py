@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import multiprocessing
 import os
 import queue
@@ -22,14 +23,36 @@ from viewshed_core import (
 )
 
 
+def _settings_path() -> Path:
+    return portable_data_root() / "settings.json"
+
+
+def _load_settings() -> dict:
+    path = _settings_path()
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_settings(settings: dict) -> None:
+    path = _settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
 class ViewshedApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Viewshed {APP_VERSION}")
-        self.geometry("760x650")
-        self.minsize(680, 560)
+        self.geometry("780x730")
+        self.minsize(700, 620)
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
+        self._settings = _load_settings()
         self._build_ui()
         self.after(100, self._drain_messages)
 
@@ -40,8 +63,8 @@ class ViewshedApp(tk.Tk):
         ttk.Label(outer, text="APRS Viewshed Generator", font=("Segoe UI", 18, "bold")).pack(anchor="w")
         ttk.Label(
             outer,
-            text="Choose an area. Viewshed will select relevant stations, acquire/cache terrain, compute coverage, and export KMZ + GeoTIFF.",
-            wraplength=700,
+            text="Choose an area. Viewshed refreshes/reuses APRS infrastructure data, acquires terrain, computes coverage, and exports KMZ + GeoTIFF.",
+            wraplength=720,
         ).pack(anchor="w", pady=(2, 14))
 
         area = ttk.LabelFrame(outer, text="Search area", padding=12)
@@ -57,27 +80,56 @@ class ViewshedApp(tk.Tk):
         ttk.Label(
             area,
             text="Stations are searched out to output radius + propagation radius so coverage crossing the area boundary is not missed.",
-            wraplength=650,
+            wraplength=670,
         ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        stations = ttk.LabelFrame(outer, text="Station data", padding=12)
+        stations = ttk.LabelFrame(outer, text="Station acquisition", padding=12)
         stations.pack(fill="x", pady=(12, 0))
+        stations.columnconfigure(1, weight=1)
+
         self.source_var = tk.StringVar(value=str(resource_path("utah_stations_scraped.json")))
-        ttk.Entry(stations, textvariable=self.source_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(stations, text="Browse…", command=self._browse_source).grid(row=0, column=1, padx=(8, 0))
-        stations.columnconfigure(0, weight=1)
+        ttk.Label(stations, text="Seed/fallback JSON").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(stations, textvariable=self.source_var).grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=3)
+        ttk.Button(stations, text="Browse…", command=self._browse_source).grid(row=0, column=2, padx=(8, 0), pady=3)
+
+        self.callsign_var = tk.StringVar(
+            value=str(self._settings.get("aprs_callsign") or os.environ.get("VIEWSHED_APRS_CALLSIGN", ""))
+        )
+        self.aprsfi_var = tk.StringVar(
+            value=str(self._settings.get("aprs_fi_api_key") or os.environ.get("VIEWSHED_APRSFI_API_KEY", ""))
+        )
+        self.refresh_var = tk.StringVar(
+            value=str(self._settings.get("live_refresh_seconds") or os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45"))
+        )
+        self.remember_var = tk.BooleanVar(value=bool(self._settings.get("remember_aprs_settings", True)))
+
+        ttk.Label(stations, text="APRS callsign").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(stations, textvariable=self.callsign_var, width=22).grid(row=1, column=1, sticky="w", padx=(12, 0), pady=3)
+        ttk.Label(stations, text="Optional; read-only APRS-IS works with N0CALL if blank.").grid(row=1, column=2, sticky="w", padx=(8, 0))
+
+        ttk.Label(stations, text="aprs.fi API key").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Entry(stations, textvariable=self.aprsfi_var, show="•", width=28).grid(row=2, column=1, sticky="w", padx=(12, 0), pady=3)
+        ttk.Label(stations, text="Optional; resolves discovered calls with missing positions.").grid(row=2, column=2, sticky="w", padx=(8, 0))
+
+        ttk.Label(stations, text="Live refresh (sec)").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Entry(stations, textvariable=self.refresh_var, width=10).grid(row=3, column=1, sticky="w", padx=(12, 0), pady=3)
+        ttk.Checkbutton(
+            stations,
+            text="Remember APRS settings on this computer",
+            variable=self.remember_var,
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
         types = ttk.Frame(stations)
-        types.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        types.grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
         self.digi_var = tk.BooleanVar(value=True)
         self.igate_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(types, text="Digipeaters", variable=self.digi_var).pack(side="left")
         ttk.Checkbutton(types, text="iGates", variable=self.igate_var).pack(side="left", padx=(18, 0))
         ttk.Label(
             stations,
-            text="v0.1 ships with the current Utah station dataset. Another compatible station JSON can be selected for other datasets.",
-            wraplength=650,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            text="The area-aware station cache is reused for up to 6 hours. When stale or for a different area, APRS-IS is sampled live; aprs.fi is used only when a key is supplied.",
+            wraplength=690,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(outer)
         actions.pack(fill="x", pady=(14, 0))
@@ -101,12 +153,41 @@ class ViewshedApp(tk.Tk):
         ttk.Entry(parent, textvariable=variable, width=24).grid(row=row, column=1, sticky="w", padx=(18, 0), pady=3)
 
     def _browse_source(self) -> None:
-        chosen = filedialog.askopenfilename(title="Choose station JSON", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        chosen = filedialog.askopenfilename(
+            title="Choose station JSON",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
         if chosen:
             self.source_var.set(chosen)
 
+    def _apply_station_settings(self) -> None:
+        refresh = int(self.refresh_var.get())
+        if not 0 <= refresh <= 300:
+            raise ValueError("Live refresh must be between 0 and 300 seconds.")
+        callsign = self.callsign_var.get().strip().upper()
+        api_key = self.aprsfi_var.get().strip()
+        if callsign:
+            os.environ["VIEWSHED_APRS_CALLSIGN"] = callsign
+        else:
+            os.environ.pop("VIEWSHED_APRS_CALLSIGN", None)
+        if api_key:
+            os.environ["VIEWSHED_APRSFI_API_KEY"] = api_key
+        else:
+            os.environ.pop("VIEWSHED_APRSFI_API_KEY", None)
+        os.environ["VIEWSHED_LIVE_REFRESH_SECONDS"] = str(refresh)
+        if self.remember_var.get():
+            _save_settings({
+                "remember_aprs_settings": True,
+                "aprs_callsign": callsign,
+                "aprs_fi_api_key": api_key,
+                "live_refresh_seconds": refresh,
+            })
+        else:
+            _settings_path().unlink(missing_ok=True)
+
     def _generate(self) -> None:
         try:
+            self._apply_station_settings()
             region = Region(float(self.lat_var.get()), float(self.lon_var.get()), float(self.radius_var.get()))
             propagation = float(self.propagation_var.get())
             types = set()
