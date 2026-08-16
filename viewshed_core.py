@@ -15,7 +15,7 @@ from dem_sources import prepare_dem as prepare_usgs_dem
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.3"
+APP_VERSION = "0.2.4"
 
 
 @dataclass(frozen=True)
