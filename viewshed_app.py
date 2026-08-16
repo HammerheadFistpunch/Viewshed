@@ -12,7 +12,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from advanced_workspace import ViewshedWorkspace
+from help_workspace import ViewshedWorkspace
 from seed_builder import SeedBuilderDialog
 from viewshed_core import APP_VERSION, USER_OVERRIDE_ENV, portable_data_root, resource_path, run_legacy_worker, self_test, user_override_path
 
