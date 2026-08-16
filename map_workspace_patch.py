@@ -1,12 +1,46 @@
 from __future__ import annotations
 
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 from map_workspace import ViewshedWorkspace as _ViewshedWorkspace
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
     """UI fixes layered over the map workspace while the UI is evolving."""
+
+    def __init__(self, master, app) -> None:
+        super().__init__(master, app)
+        self._install_correction_map_controls()
+
+    def _install_correction_map_controls(self) -> None:
+        controls = ttk.Frame(self.corrections_tab, padding=4)
+        controls.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
+        ttk.Button(controls, text="Topo", command=self._use_topo_map).pack(side="left")
+        ttk.Button(controls, text="Standard", command=self._use_standard_map).pack(side="left", padx=(4, 0))
+        self.correction_attribution = ttk.Label(
+            self.corrections_tab,
+            text="Topo: © OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)",
+        )
+        self.correction_attribution.place(relx=1.0, rely=1.0, anchor="se", x=-12, y=-8)
+        self._use_topo_map()
+
+    def _use_topo_map(self) -> None:
+        self.correction_map.set_tile_server(
+            "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+            max_zoom=17,
+        )
+        if hasattr(self, "correction_attribution"):
+            self.correction_attribution.configure(
+                text="Topo: © OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)"
+            )
+
+    def _use_standard_map(self) -> None:
+        self.correction_map.set_tile_server(
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            max_zoom=19,
+        )
+        if hasattr(self, "correction_attribution"):
+            self.correction_attribution.configure(text="Map data: © OpenStreetMap contributors")
 
     @staticmethod
     def _coordinate_pair(lat_value, lon_value):
@@ -57,8 +91,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         review = rec.get("_location_correction") or rec.get("_location_review_candidate") or {}
         candidate = self._coordinate_pair(review.get("candidate_lat"), review.get("candidate_lon"))
         if candidate is None:
-            # User should always start from a valid point.  This also prevents
-            # float("") errors before the first map click.
             candidate = model
         proposal_lat, proposal_lon = candidate
         self.correct_lat.set(f"{proposal_lat:.6f}")

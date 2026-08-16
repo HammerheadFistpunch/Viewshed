@@ -58,7 +58,11 @@ class ViewshedApp(tk.Tk):
         self._settings = _load_settings()
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
+        self._last_kmz: Path | None = None
+        self._last_tif: Path | None = None
         self._job_running = False
+        self._current_process: subprocess.Popen | None = None
+        self._cancel_requested = False
         self._seed_builder: SeedBuilderDialog | None = None
         self._build_ui()
         self.after(100, self._drain_messages)
@@ -71,8 +75,12 @@ class ViewshedApp(tk.Tk):
         header.pack(fill="x")
         ttk.Label(header, text="Viewshed", font=("Segoe UI", 20, "bold")).pack(side="left")
         ttk.Label(header, text=f"v{APP_VERSION}  •  map-first VHF propagation workspace").pack(side="left", padx=(10, 0), pady=(7, 0))
-        self.open_btn = ttk.Button(header, text="Open Last Output", command=self._open_output, state="disabled")
-        self.open_btn.pack(side="right")
+        self.open_folder_btn = ttk.Button(header, text="Open Output Folder", command=self._open_output, state="disabled")
+        self.open_folder_btn.pack(side="right")
+        self.open_kmz_btn = ttk.Button(header, text="Open KMZ", command=lambda: self._open_path(self._last_kmz), state="disabled")
+        self.open_kmz_btn.pack(side="right", padx=(0, 6))
+        self.open_tif_btn = ttk.Button(header, text="Open GeoTIFF", command=lambda: self._open_path(self._last_tif), state="disabled")
+        self.open_tif_btn.pack(side="right", padx=(0, 6))
         ttk.Button(header, text="Build Seed…", command=self._open_seed_builder).pack(side="right", padx=(0, 8))
 
         settings = ttk.LabelFrame(outer, text="Shared APRS / data settings", padding=8)
@@ -104,6 +112,8 @@ class ViewshedApp(tk.Tk):
         self.status_var = tk.StringVar(value="Ready")
         self.percent_var = tk.StringVar(value="0%")
         ttk.Label(status, textvariable=self.status_var).pack(side="left")
+        self.cancel_btn = ttk.Button(status, text="Cancel Run", command=self.cancel_job, state="disabled")
+        self.cancel_btn.pack(side="right", padx=(8, 0))
         ttk.Label(status, textvariable=self.percent_var).pack(side="right")
         self.progress = ttk.Progressbar(outer, orient="horizontal", mode="determinate", maximum=100)
         self.progress.pack(fill="x", pady=(3, 0))
@@ -153,7 +163,7 @@ class ViewshedApp(tk.Tk):
 
     def start_job(self, job_file: Path, label: str) -> None:
         if self._job_running:
-            messagebox.showwarning("Propagation already running", "Finish the current propagation job before starting another.", parent=self)
+            messagebox.showwarning("Propagation already running", "Finish or cancel the current propagation job before starting another.", parent=self)
             return
         try:
             self.apply_network_settings()
@@ -161,7 +171,10 @@ class ViewshedApp(tk.Tk):
             messagebox.showerror("Invalid settings", str(exc), parent=self)
             return
         self._job_running = True
-        self.open_btn.configure(state="disabled")
+        self._cancel_requested = False
+        self._current_process = None
+        self.cancel_btn.configure(state="normal")
+        self._reset_output_buttons()
         self._set_progress(2, f"Starting {label} propagation…")
         self._append_log(f"\nStarting {label} job: {job_file.parent}\n")
         threading.Thread(target=self._run_job, args=(job_file,), daemon=True).start()
@@ -176,6 +189,7 @@ class ViewshedApp(tk.Tk):
             child_env["PYTHONIOENCODING"] = "utf-8"
             child_env["PYTHONUTF8"] = "1"
             child_env["PYTHONUNBUFFERED"] = "1"
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
@@ -186,16 +200,66 @@ class ViewshedApp(tk.Tk):
                 bufsize=1,
                 cwd=str(Path(job_file).parent),
                 env=child_env,
+                creationflags=creationflags,
             )
+            self._current_process = process
+            if self._cancel_requested:
+                self._terminate_process_tree(process)
             assert process.stdout is not None
             for line in process.stdout:
                 self._messages.put(("log", line))
             code = process.wait()
+            self._current_process = None
+            if self._cancel_requested:
+                self._messages.put(("cancelled", str(job_file.parent)))
+                return
             if code != 0:
                 raise RuntimeError(f"Viewshed worker exited with code {code}.")
             self._messages.put(("done", str(job_file.parent / "output")))
         except Exception as exc:
-            self._messages.put(("error", str(exc)))
+            self._current_process = None
+            if self._cancel_requested:
+                self._messages.put(("cancelled", str(job_file.parent)))
+            else:
+                self._messages.put(("error", str(exc)))
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    check=False,
+                )
+            else:
+                process.terminate()
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+
+    def cancel_job(self) -> None:
+        if not self._job_running:
+            return
+        if not messagebox.askyesno(
+            "Cancel propagation",
+            "Stop the current propagation run?\n\nDownloaded DEM cache files will be kept for future runs.",
+            parent=self,
+        ):
+            return
+        self._cancel_requested = True
+        self.cancel_btn.configure(state="disabled")
+        self.status_var.set("Cancelling propagation…")
+        self._append_log("\nCancellation requested. Stopping worker process tree…\n")
+        process = self._current_process
+        if process is not None:
+            threading.Thread(target=self._terminate_process_tree, args=(process,), daemon=True).start()
 
     def _set_progress(self, percent: int, status: str) -> None:
         percent = max(0, min(100, percent))
@@ -228,13 +292,26 @@ class ViewshedApp(tk.Tk):
                     self._append_log(text)
                 elif kind == "done":
                     self._job_running = False
+                    self._cancel_requested = False
+                    self.cancel_btn.configure(state="disabled")
                     self._last_output = Path(text)
-                    self.open_btn.configure(state="normal")
+                    self._refresh_output_buttons()
                     self._set_progress(100, "Complete — outputs are ready")
                     self._append_log(f"\nComplete. Output: {text}\n")
-                    messagebox.showinfo("Viewshed complete", f"Outputs are ready in:\n{text}", parent=self)
+                    if messagebox.askyesno("Viewshed complete", f"Outputs are ready in:\n{text}\n\nOpen the output folder now?", parent=self):
+                        self._open_output()
+                elif kind == "cancelled":
+                    self._job_running = False
+                    self._cancel_requested = False
+                    self._current_process = None
+                    self.cancel_btn.configure(state="disabled")
+                    self.status_var.set("Cancelled")
+                    self._append_log(f"\nCancelled. Partial job data remains in: {text}\n")
                 elif kind == "error":
                     self._job_running = False
+                    self._cancel_requested = False
+                    self._current_process = None
+                    self.cancel_btn.configure(state="disabled")
                     self.status_var.set("Failed — see propagation job log")
                     self._append_log(f"\nERROR: {text}\n")
                     messagebox.showerror("Viewshed failed", text, parent=self)
@@ -248,12 +325,35 @@ class ViewshedApp(tk.Tk):
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def _open_output(self) -> None:
-        if not self._last_output: return
-        path = str(self._last_output)
+    def _reset_output_buttons(self) -> None:
+        self._last_output = None
+        self._last_kmz = None
+        self._last_tif = None
+        self.open_folder_btn.configure(state="disabled")
+        self.open_kmz_btn.configure(state="disabled")
+        self.open_tif_btn.configure(state="disabled")
+
+    def _refresh_output_buttons(self) -> None:
+        if not self._last_output or not self._last_output.exists():
+            self._reset_output_buttons()
+            return
+        self.open_folder_btn.configure(state="normal")
+        self._last_kmz = next(iter(sorted(self._last_output.glob("*.kmz"))), None)
+        tifs = sorted(self._last_output.rglob("*.tif"))
+        self._last_tif = next((p for p in tifs if p.name == "coverage_count.tif"), tifs[0] if tifs else None)
+        self.open_kmz_btn.configure(state="normal" if self._last_kmz else "disabled")
+        self.open_tif_btn.configure(state="normal" if self._last_tif else "disabled")
+
+    def _open_path(self, target: Path | None) -> None:
+        if target is None or not target.exists():
+            return
+        path = str(target)
         if sys.platform == "win32": os.startfile(path)  # type: ignore[attr-defined]
         elif sys.platform == "darwin": subprocess.Popen(["open", path])
         else: subprocess.Popen(["xdg-open", path])
+
+    def _open_output(self) -> None:
+        self._open_path(self._last_output)
 
 
 def parse_args() -> argparse.Namespace:
