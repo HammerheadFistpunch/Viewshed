@@ -1,46 +1,18 @@
 @echo off
-REM ─────────────────────────────────────────────────────────────────────────
-REM  run_viewshed.bat  —  Double-click launcher for aprs_viewshed_utah_parallel.py
-REM
-REM  Guarantees:
-REM    1. Working directory = this folder (so all relative paths work)
-REM    2. Uses python.exe (not pythonw.exe) so you get a real console window
-REM    3. Window stays open after finish or crash so you can read the output
-REM ─────────────────────────────────────────────────────────────────────────
-
-REM Change to the folder this .bat lives in
+setlocal
 cd /d "%~dp0"
 
-REM Try to find python.exe on PATH, then common install locations
+REM Development launcher. End users should normally run Viewshed.exe.
 where python >nul 2>&1
-if %errorlevel% == 0 (
-    python aprs_viewshed_utah_parallel.py
-    goto done
+if errorlevel 1 (
+    echo.
+    echo Python was not found on PATH.
+    echo Download the packaged Viewshed.exe build from the GitHub Actions artifact,
+    echo or install Python 3.12 for development use.
+    echo.
+    pause
+    exit /b 1
 )
 
-REM Fallback to common Python install paths
-if exist "C:\Python312\python.exe" (
-    "C:\Python312\python.exe" aprs_viewshed_utah_parallel.py
-    goto done
-)
-if exist "C:\Python311\python.exe" (
-    "C:\Python311\python.exe" aprs_viewshed_utah_parallel.py
-    goto done
-)
-if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
-    "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" aprs_viewshed_utah_parallel.py
-    goto done
-)
-if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
-    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" aprs_viewshed_utah_parallel.py
-    goto done
-)
-
-echo.
-echo  ERROR: python.exe not found.
-echo  Please install Python from https://www.python.org/downloads/
-echo  and make sure to check "Add Python to PATH" during installation.
-echo.
-
-:done
-pause
+python viewshed_app.py
+if errorlevel 1 pause

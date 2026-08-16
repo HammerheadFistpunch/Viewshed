@@ -1,73 +1,138 @@
 # Viewshed
 
-Utah APRS coverage modeling tools for collecting station data and generating terrain-aware VHF coverage overlays for Google Earth.
+Viewshed is becoming a portable, one-click APRS RF coverage generator. The intended user workflow is simple: choose an area, click **Generate Viewshed**, and receive Google Earth KMZ and GeoTIFF coverage outputs without manually running the scraper, DEM tools, or propagation scripts.
 
-## What is here
+## Current application milestone (v0.1)
 
-- `aprs_is_scrape_utah.py` — listens to APRS-IS, collects Utah digipeater/iGate data, and writes `utah_stations_scraped.json`.
-- `aprs_viewshed_utah_parallel.py` — builds DEM inputs, computes per-station terrain/ITM coverage, merges the results, and writes `aprs_coverage_utah.kmz`.
-- `aprs_validator.py` — validates APRS station data.
-- `DEM grab raw.py` — standalone DEM download/merge utility.
-- `run_viewshed.bat` — Windows launcher for the viewshed generator.
-- `utah_seed_stations.csv` — seed/override station list used by the scraper.
-- `APRS dataset/` — retained sample/reference KMZ data.
+The repository now contains the first application shell around the existing propagation engine:
 
-## Quick start
+- Tkinter GUI (`viewshed_app.py`)
+- center-point + radius search area
+- configurable maximum propagation radius
+- digipeater / iGate filtering
+- propagation-aware station selection (search area plus RF buffer)
+- automatic DEM download and caching through the existing engine
+- parallel ITM Longley-Rice viewshed calculation
+- KMZ and GeoTIFF output
+- deterministic per-job output folders
+- PyInstaller configuration for a single Windows executable
+- GitHub Actions build that produces a `Viewshed.exe` artifact on every push to `main`
 
-Requires Python 3 and the packages in `requirements.txt`.
+The existing Utah station dataset is bundled as the default station source for v0.1. The GUI can also browse to another compatible JSON dataset. Automatic general-purpose station discovery is the next major data-source milestone.
+
+## User workflow
+
+1. Run `Viewshed.exe` (or `run_viewshed.bat` when developing from source).
+2. Enter a center latitude, longitude, and output radius.
+3. Choose the maximum RF propagation radius and station types.
+4. Click **Generate Viewshed**.
+5. The application selects stations that can affect the requested area, downloads/reuses elevation data, computes viewsheds, and writes the results.
+
+Outputs are written under a portable `ViewshedData/jobs/<timestamp>/output/` directory next to the executable when that location is writable. If it is not writable, the application falls back to `~/ViewshedData`.
+
+Primary outputs:
+
+- `viewshed.kmz` — Google Earth visualization
+- `coverage_count.tif` — combined coverage-count GeoTIFF
+
+Intermediate DEM and station viewshed files live under the job's `output/work/` directory. Reusable DEM downloads are kept in `ViewshedData/cache/dem/`.
+
+## Area semantics
+
+The **output radius** describes the area the user cares about. Station selection uses a larger acquisition radius:
+
+```text
+station search radius = output radius + maximum propagation radius
+```
+
+This prevents a transmitter just outside the selected area from being excluded even though its RF footprint reaches into the selected area.
+
+At the v0.1 milestone, the legacy backend still creates the complete coverage footprint for the selected stations rather than cropping every product to the user's output circle. Exact output clipping is planned as the generalized engine is migrated out of the Utah prototype.
+
+## Run from source
+
+Python 3.12 is recommended.
 
 ```bash
 python -m pip install -r requirements.txt
+python viewshed_app.py
 ```
 
-### Generate or refresh station data
-
-```bash
-python aprs_is_scrape_utah.py
-```
-
-The scraper writes `utah_stations_scraped.json`. It is designed as a long-running APRS-IS listener; review its configuration before starting a collection run.
-
-### Generate the coverage model
-
-```bash
-python aprs_viewshed_utah_parallel.py
-```
-
-On Windows, `run_viewshed.bat` is also provided for a double-click-friendly launch.
-
-The generator downloads/caches required elevation tiles, computes coverage for the configured stations, and creates:
+Or double-click:
 
 ```text
-aprs_coverage_utah.kmz
+run_viewshed.bat
 ```
 
-Open that file in Google Earth Pro. Intermediate DEMs, rasters, station overlays, and caches are written under `dem_cache/` and `aprs_viewshed_work/`; those generated directories are intentionally ignored by Git.
+The old direct backend remains in `aprs_viewshed_utah_parallel.py` for development and regression comparison, but it is no longer the intended user entry point.
 
-## Configuration
+## Build the Windows executable
 
-The main coverage settings are in the `CONFIG` dictionary near the top of `aprs_viewshed_utah_parallel.py`. Current defaults include:
+```bash
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
+pyinstaller --clean --noconfirm viewshed.spec
+```
 
-- APRS frequency: `144.390 MHz`
-- maximum modeled radius: `180 km`
-- 720 radials per station
-- DEM resolution setting: `30m`
-- parallel CPU workers: automatic (`os.cpu_count()`)
+The resulting executable is:
 
-The script also contains link-budget, antenna-height, ITM, rendering, cache, and coordinate-override settings. Review those values before treating an output as an engineering prediction.
+```text
+dist/Viewshed.exe
+```
 
-## Generated files
+A lightweight packaged smoke test is available:
 
-The following are runtime artifacts and should normally stay out of version control:
+```bash
+Viewshed.exe --self-test
+```
 
-- `.vs/`
-- `*.log` and `run_log.txt`
-- `dem_cache/`
-- `aprs_viewshed_work/`
-- `aprs_coverage_utah.kmz`
+GitHub Actions performs the same build and smoke test on Windows and uploads the executable as the `Viewshed-Windows` artifact.
 
-Reference/input datasets that are already tracked are not excluded globally; for example, KMZ files under `APRS dataset/` remain versioned.
+## Station JSON format
 
-## Notes
+The application currently accepts the same station records used by the prototype. A source can be a JSON list or an object containing a `stations`, `results`, or `data` list. Each usable record needs at least:
 
-This repository is currently a working research/prototyping project rather than a packaged Python library. The cleanup intentionally keeps the existing analysis algorithms and data flow intact while separating source files from machine-specific and generated artifacts.
+```json
+{
+  "callsign": "EXAMPLE",
+  "type": "digi",
+  "lat": 40.7608,
+  "lon": -111.8910
+}
+```
+
+`type` is currently expected to be `digi` or `igate`.
+
+## Architecture direction
+
+The application is being migrated toward these boundaries:
+
+```text
+GUI / CLI
+   |
+Region + job controller
+   |
+Station source  -> station cache/filter
+   |
+Terrain source  -> DEM cache
+   |
+Propagation engine
+   |
+KMZ / GeoTIFF exporters
+```
+
+`viewshed_core.py` now owns the region, job, station-filtering, portable-data, and worker-controller responsibilities. The large Utah prototype remains the propagation backend temporarily so the working ITM/raster implementation can be migrated incrementally rather than rewritten all at once.
+
+## Near-term roadmap
+
+1. Generalize the propagation backend beyond Utah-specific validation and UTM zone 12.
+2. Crop outputs to the requested region.
+3. Replace the bundled Utah-only station source with automatic regional station acquisition/cache.
+4. Add bounding-box area selection.
+5. Add a visual map area selector after the core geographic pipeline is stable.
+6. Move DEM, propagation, and export code into focused modules.
+7. Add automated unit/integration tests around region selection, DEM acquisition, and output generation.
+
+## Scope
+
+The project currently focuses only on **generating predicted viewshed / RF coverage data**. Historical KML/KMZ track comparison is intentionally out of scope for this application phase.

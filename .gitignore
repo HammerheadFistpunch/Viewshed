@@ -22,6 +22,11 @@ env/
 /dem_cache/
 /aprs_viewshed_work/
 /aprs_coverage_utah.kmz
+/ViewshedData/
+
+# Build output
+/build/
+/dist/
 
 # OS metadata
 .DS_Store
