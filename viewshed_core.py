@@ -320,7 +320,7 @@ def run_legacy_worker(job_file: Path) -> Path:
         "tx_antenna_gain_dbd": 0.0,
         "rx_sensitivity_dbm": -119.0,
         "rx_antenna_gain_dbd": 2.0,
-        "max_path_loss_db": 158.0,
+        "max_path_loss_db": 148.0,
         "margin_display_floor_db": 0.0,
         "max_margin_db": 30.0,
     })
@@ -330,7 +330,7 @@ def run_legacy_worker(job_file: Path) -> Path:
     print(f"TX power: {float(cfg.get('tx_power_dbm', 47.0)):.1f} dBm")
     print(f"TX antenna gain: {float(cfg.get('tx_antenna_gain_dbd', 0.0)):.1f} dBd")
     print(f"TX antenna height: {float(cfg.get('antenna_height_digi_m', 20.0)):.1f} m AGL")
-    print(f"Operational path-loss budget: {float(cfg.get('max_path_loss_db', 158.0)):.1f} dB")
+    print(f"Operational path-loss budget: {float(cfg.get('max_path_loss_db', 148.0)):.1f} dB")
     print("Map metric: remaining link margin (0 dB = operational edge)")
 
     stations, colocation_map = engine.load_stations(job.filtered_stations, cfg)
