@@ -65,37 +65,50 @@ def _source_name(record: dict) -> str:
     return "unknown"
 
 
-def _score_record(record: dict, registry_entry: dict | None, now: float) -> tuple[int, list[str]]:
-    source = _source_name(record)
-    score = SOURCE_BASE_SCORES.get(source, SOURCE_BASE_SCORES["unknown"])
-    reasons = [f"source={source}"]
-
+def _position_freshness(record: dict, now: float) -> dict:
+    """Describe observation freshness without treating it as coordinate accuracy."""
     lasttime = record.get("lasttime") or record.get("last seen")
     try:
-        age_days = max(0.0, (now - float(lasttime)) / 86400.0)
+        timestamp = float(lasttime)
+        if timestamp <= 0:
+            raise ValueError
+        age_days = max(0.0, (now - timestamp) / 86400.0)
     except (TypeError, ValueError):
-        age_days = None
+        return {
+            "label": "UNKNOWN",
+            "age_days": None,
+            "reason": "no usable position timestamp",
+        }
 
-    if age_days is None or float(lasttime or 0) <= 0:
-        score -= 10
-        reasons.append("no usable position timestamp")
-    elif age_days > 365:
-        score -= 15
-        reasons.append(f"position older than 1 year ({age_days:.0f} d)")
-    elif age_days > 90:
-        score -= 7
-        reasons.append(f"position older than 90 days ({age_days:.0f} d)")
-    elif age_days <= 7:
-        score += 3
-        reasons.append("position seen within 7 days")
+    if age_days <= 7:
+        label = "RECENT"
+        reason = f"position seen within {age_days:.1f} days"
+    elif age_days <= 90:
+        label = "AGING"
+        reason = f"position last seen {age_days:.0f} days ago"
+    elif age_days <= 365:
+        label = "STALE"
+        reason = f"position last seen {age_days:.0f} days ago"
+    else:
+        label = "VERY_STALE"
+        reason = f"position last seen {age_days:.0f} days ago"
+    return {"label": label, "age_days": age_days, "reason": reason}
+
+
+def _score_record(record: dict, registry_entry: dict | None) -> tuple[int, list[str]]:
+    """Score coordinate provenance, not station observation freshness.
+
+    A missing or old timestamp says whether we know the station was observed
+    recently; by itself it does not say the reported latitude/longitude is wrong.
+    Freshness is tracked separately in _location_confidence["freshness"].
+    """
+    source = _source_name(record)
+    score = SOURCE_BASE_SCORES.get(source, SOURCE_BASE_SCORES["unknown"])
+    reasons = [f"coordinate source={source}"]
 
     if record.get("_seed_only"):
-        # A seed-only position is unconfirmed live, but that alone should not
-        # make nearly every useful fallback station LOW confidence. A normal
-        # seed with no timestamp now lands at 55 (MEDIUM); genuinely stale seed
-        # data can still fall below the LOW threshold.
         score = min(score, 65)
-        reasons.append("seed-only coordinate; not confirmed live")
+        reasons.append("seed-only coordinate; not confirmed by current live sample")
 
     if registry_entry:
         status = str(registry_entry.get("status") or "candidate").lower()
@@ -118,11 +131,12 @@ def _label(score: int) -> str:
 
 
 def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -> list[dict]:
-    """Attach confidence metadata and apply only explicitly reviewed overrides.
+    """Attach coordinate confidence/freshness and apply reviewed overrides only.
 
     Raw/reporting coordinates are always preserved as _reported_lat/_reported_lon.
-    Candidate corrections never change coordinates; they only lower confidence and
-    add review metadata. This keeps data-quality decisions outside propagation math.
+    Candidate corrections never change coordinates; they only lower coordinate
+    confidence and add review metadata. Observation freshness is recorded
+    separately and never moves a station into the correction queue by itself.
     """
     registry = _effective_registry(registry_path)
     now = time.time()
@@ -144,7 +158,8 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
             continue
 
         entry = registry.get(call)
-        score, reasons = _score_record(record, entry, now)
+        score, reasons = _score_record(record, entry)
+        freshness = _position_freshness(record, now)
 
         if entry:
             status = str(entry.get("status") or "candidate").lower()
@@ -173,6 +188,7 @@ def assess_and_correct_locations(records: Iterable[dict], registry_path: Path) -
             "label": _label(score),
             "reasons": reasons,
             "reported_source": _source_name(record),
+            "freshness": freshness,
         }
         assessed.append(record)
 
