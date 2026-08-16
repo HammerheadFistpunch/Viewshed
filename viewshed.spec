@@ -9,6 +9,7 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL"):
 datas = [
     ("utah_stations_scraped.json", "."),
     ("utah_seed_stations.csv", "."),
+    ("station_location_overrides.json", "."),
 ]
 datas += collect_data_files("rasterio")
 

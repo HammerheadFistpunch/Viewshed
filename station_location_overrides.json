@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "overrides": {
+    "SCOTTS": {
+      "status": "reviewed",
+      "lat": 40.62277001558261,
+      "lon": -111.56863133047902,
+      "reason": "Migrated from the legacy Viewshed coordinate_overrides table so correction behavior is centralized and auditable.",
+      "source": "Viewshed legacy reviewed override; original external provenance not recorded"
+    },
+    "FARNSWT": {
+      "status": "candidate",
+      "lat": 40.65,
+      "lon": -112.2,
+      "reason": "Reported APRS position appears inconsistent with the expected Farnsworth Peak site. This is only a review candidate; the propagation coordinate is not changed until the actual radio installation is independently verified.",
+      "source": "USGS GNIS Farnsworth Peak, feature ID GNIS49006263 (summit coordinate, not verified transmitter coordinate)",
+      "source_url": "https://www.usgs.gov/tools/geographic-names-information-system-gnis"
+    }
+  }
+}

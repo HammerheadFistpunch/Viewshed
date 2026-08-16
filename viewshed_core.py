@@ -12,10 +12,11 @@ from typing import Iterable
 
 from analysis_dem import prepare_analysis_dem
 from dem_sources import prepare_dem as prepare_usgs_dem
+from location_quality import assess_and_correct_locations, summarize_location_quality
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.5"
+APP_VERSION = "0.2.6"
 
 
 @dataclass(frozen=True)
@@ -160,6 +161,33 @@ def _refresh_job_stations(job: JobConfig) -> list[dict]:
         aprs_fi_api_key=os.environ.get("VIEWSHED_APRSFI_API_KEY", ""),
     )
     stations = load_station_records(cache_path)
+    stations = assess_and_correct_locations(
+        stations,
+        resource_path("station_location_overrides.json"),
+    )
+    quality = summarize_location_quality(stations)
+    print(
+        "Location confidence: "
+        f"HIGH {quality['HIGH']}, MEDIUM {quality['MEDIUM']}, LOW {quality['LOW']}"
+        f"; reviewed corrections {quality['CORRECTED']}; review candidates {quality['REVIEW']}"
+    )
+    for station in stations:
+        if station.get("_location_correction"):
+            raw_lat = station.get("_reported_lat")
+            raw_lon = station.get("_reported_lon")
+            print(
+                f"Location correction: {station.get('callsign','?')} "
+                f"reported=({raw_lat}, {raw_lon}) -> "
+                f"model=({station.get('lat')}, {station.get('lon')})"
+            )
+        elif station.get("_location_review_candidate"):
+            confidence = station.get("_location_confidence") or {}
+            print(
+                f"Location review: {station.get('callsign','?')} "
+                f"confidence={confidence.get('label','LOW')} "
+                f"score={confidence.get('score','?')} (coordinate unchanged)"
+            )
+
     selected = filter_stations(stations, job.region, set(job.include_types), job.propagation_radius_km)
     Path(job.filtered_stations).write_text(json.dumps(selected, indent=2), encoding="utf-8")
     return selected
@@ -197,20 +225,18 @@ def run_legacy_worker(job_file: Path) -> Path:
         "clear_viewshed_cache": False,
         "cpu_workers": max(1, min(8, os.cpu_count() or 4)),
         "worker_dem_max_px": 2500,
+        "coordinate_overrides": {},
 
-        # Reference radio system for map projection.  Terrain/ITM loss is still
+        # Reference radio system for map projection. Terrain/ITM loss is still
         # calculated from the DEM; this value is an explicit operating
         # assumption rather than claimed station-specific ERP/antenna data.
-        # 158 dB is intentionally conservative versus an ideal 50 W VHF link
-        # and leaves practical reserve for feedline loss, installation loss,
-        # fading, multipath, vehicle orientation, and packet decode margin.
         "tx_power_dbm": 47.0,
         "tx_antenna_gain_dbd": 0.0,
         "rx_sensitivity_dbm": -119.0,
         "rx_antenna_gain_dbd": 2.0,
         "max_path_loss_db": 158.0,
 
-        # Render positive remaining link margin.  The map therefore answers
+        # Render positive remaining link margin. The map therefore answers
         # "how much reserve remains?" instead of using one binary 161 dB edge.
         "margin_display_floor_db": 0.0,
         "max_margin_db": 30.0,
@@ -253,8 +279,17 @@ def run_legacy_worker(job_file: Path) -> Path:
 def self_test() -> str:
     source = resource_path("utah_stations_scraped.json")
     stations = load_station_records(source)
+    stations = assess_and_correct_locations(
+        stations,
+        resource_path("station_location_overrides.json"),
+    )
     region = Region(40.7608, -111.8910, 100.0)
     selected = filter_stations(stations, region, {"digi", "igate"}, 180.0)
     if not selected:
         raise RuntimeError("Bundled station data could not be loaded or filtered.")
-    return f"Viewshed {APP_VERSION}: core OK, {len(stations)} bundled stations, {len(selected)} selected in smoke region"
+    quality = summarize_location_quality(stations)
+    return (
+        f"Viewshed {APP_VERSION}: core OK, {len(stations)} bundled stations, "
+        f"{len(selected)} selected in smoke region; location quality "
+        f"H/M/L={quality['HIGH']}/{quality['MEDIUM']}/{quality['LOW']}"
+    )
