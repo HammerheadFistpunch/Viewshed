@@ -2,6 +2,8 @@
 
 Viewshed is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes all feed the same DEM -> terrain profile -> Longley-Rice/ITM -> path-loss -> link-margin foundation.
 
+**Current development snapshot:** cancellation/output controls, topo/OSM-assisted corrections, 148 dB reference profile, persistent Advanced settings, and bundled offline Help/documentation are implemented. The next major technical work is DEM-assisted correction review and range-clipping diagnostics.
+
 ## Quick links
 
 - [Quick Start](docs/QUICK_START.md)
