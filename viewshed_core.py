@@ -15,7 +15,7 @@ from dem_sources import prepare_dem as prepare_usgs_dem
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.2.5"
 
 
 @dataclass(frozen=True)
@@ -197,7 +197,29 @@ def run_legacy_worker(job_file: Path) -> Path:
         "clear_viewshed_cache": False,
         "cpu_workers": max(1, min(8, os.cpu_count() or 4)),
         "worker_dem_max_px": 2500,
+
+        # Reference radio system for map projection.  Terrain/ITM loss is still
+        # calculated from the DEM; this value is an explicit operating
+        # assumption rather than claimed station-specific ERP/antenna data.
+        # 158 dB is intentionally conservative versus an ideal 50 W VHF link
+        # and leaves practical reserve for feedline loss, installation loss,
+        # fading, multipath, vehicle orientation, and packet decode margin.
+        "tx_power_dbm": 47.0,
+        "tx_antenna_gain_dbd": 0.0,
+        "rx_sensitivity_dbm": -119.0,
+        "rx_antenna_gain_dbd": 2.0,
+        "max_path_loss_db": 158.0,
+
+        # Render positive remaining link margin.  The map therefore answers
+        # "how much reserve remains?" instead of using one binary 161 dB edge.
+        "margin_display_floor_db": 0.0,
+        "max_margin_db": 30.0,
     })
+
+    print("Reference radio profile: 50 W VHF mobile / practical antenna")
+    print("Operational path-loss budget: 158 dB")
+    print("Map metric: remaining link margin (0 dB = operational edge)")
+    print("Interpretation: 0-10 dB marginal, 10-20 dB good, 20+ dB strong")
 
     stations, colocation_map = engine.load_stations(job.filtered_stations, cfg)
     if not stations:
