@@ -12,9 +12,10 @@ from typing import Iterable
 
 from analysis_dem import prepare_analysis_dem
 from dem_sources import prepare_dem as prepare_usgs_dem
+from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 
 
 @dataclass(frozen=True)
@@ -183,6 +184,7 @@ def run_legacy_worker(job_file: Path) -> Path:
     print(f"Station acquisition selected {len(selected)} station(s).")
 
     import aprs_viewshed_utah_parallel as engine
+    install_rendering_fix(engine)
 
     cfg = dict(engine.CONFIG)
     cfg.update({
