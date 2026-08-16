@@ -12,20 +12,11 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from map_workspace import MapWorkspace, USER_OVERRIDE_ENV, user_override_path
-from viewshed_core import (
-    APP_VERSION,
-    Region,
-    portable_data_root,
-    prepare_job,
-    resource_path,
-    run_legacy_worker,
-    self_test,
-)
+from map_workspace import ViewshedWorkspace
+from viewshed_core import APP_VERSION, USER_OVERRIDE_ENV, portable_data_root, resource_path, run_legacy_worker, self_test, user_override_path
 
 
 def _configure_stdio_utf8() -> None:
-    """Keep packaged worker logging safe on Windows code pages."""
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         reconfigure = getattr(stream, "reconfigure", None)
@@ -42,8 +33,7 @@ def _settings_path() -> Path:
 
 def _load_settings() -> dict:
     path = _settings_path()
-    if not path.exists():
-        return {}
+    if not path.exists(): return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
@@ -62,152 +52,83 @@ class ViewshedApp(tk.Tk):
         super().__init__()
         os.environ[USER_OVERRIDE_ENV] = str(user_override_path())
         self.title(f"Viewshed {APP_VERSION}")
-        self.geometry("800x790")
-        self.minsize(720, 660)
+        self.geometry("1280x900")
+        self.minsize(1000, 720)
+        self._settings = _load_settings()
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
-        self._map_workspace: MapWorkspace | None = None
-        self._settings = _load_settings()
+        self._job_running = False
         self._build_ui()
         self.after(100, self._drain_messages)
 
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self, padding=16)
+        outer = ttk.Frame(self, padding=10)
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="APRS Viewshed Generator", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(
-            outer,
-            text="Choose an area. Viewshed refreshes/reuses APRS infrastructure data, acquires terrain, computes coverage, and exports KMZ + GeoTIFF.",
-            wraplength=740,
-        ).pack(anchor="w", pady=(2, 14))
+        header = ttk.Frame(outer)
+        header.pack(fill="x")
+        ttk.Label(header, text="Viewshed", font=("Segoe UI", 20, "bold")).pack(side="left")
+        ttk.Label(header, text=f"v{APP_VERSION}  •  map-first VHF propagation workspace").pack(side="left", padx=(10, 0), pady=(7, 0))
+        self.open_btn = ttk.Button(header, text="Open Last Output", command=self._open_output, state="disabled")
+        self.open_btn.pack(side="right")
 
-        area = ttk.LabelFrame(outer, text="Search area", padding=12)
-        area.pack(fill="x")
-        self.lat_var = tk.StringVar(value="40.7608")
-        self.lon_var = tk.StringVar(value="-111.8910")
-        self.radius_var = tk.StringVar(value="100")
-        self.propagation_var = tk.StringVar(value="180")
-        self._field(area, 0, "Center latitude", self.lat_var)
-        self._field(area, 1, "Center longitude", self.lon_var)
-        self._field(area, 2, "Output radius (km)", self.radius_var)
-        self._field(area, 3, "Max propagation radius (km)", self.propagation_var)
-        ttk.Label(
-            area,
-            text="Stations are searched out to output radius + propagation radius so coverage crossing the area boundary is not missed.",
-            wraplength=690,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-        stations = ttk.LabelFrame(outer, text="Station acquisition", padding=12)
-        stations.pack(fill="x", pady=(12, 0))
-        stations.columnconfigure(1, weight=1)
-
+        settings = ttk.LabelFrame(outer, text="Shared APRS / data settings", padding=8)
+        settings.pack(fill="x", pady=(8, 8))
+        settings.columnconfigure(7, weight=1)
         self.source_var = tk.StringVar(value=str(resource_path("utah_stations_scraped.json")))
-        ttk.Label(stations, text="Seed/fallback JSON").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Entry(stations, textvariable=self.source_var).grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=3)
-        ttk.Button(stations, text="Browse…", command=self._browse_source).grid(row=0, column=2, padx=(8, 0), pady=3)
-
-        self.callsign_var = tk.StringVar(
-            value=str(self._settings.get("aprs_callsign") or os.environ.get("VIEWSHED_APRS_CALLSIGN", ""))
-        )
-        self.aprsfi_var = tk.StringVar(
-            value=str(self._settings.get("aprs_fi_api_key") or os.environ.get("VIEWSHED_APRSFI_API_KEY", ""))
-        )
-        self.refresh_var = tk.StringVar(
-            value=str(self._settings.get("live_refresh_seconds") or os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45"))
-        )
+        self.callsign_var = tk.StringVar(value=str(self._settings.get("aprs_callsign") or os.environ.get("VIEWSHED_APRS_CALLSIGN", "")))
+        self.aprsfi_var = tk.StringVar(value=str(self._settings.get("aprs_fi_api_key") or os.environ.get("VIEWSHED_APRSFI_API_KEY", "")))
+        self.refresh_var = tk.StringVar(value=str(self._settings.get("live_refresh_seconds") or os.environ.get("VIEWSHED_LIVE_REFRESH_SECONDS", "45")))
         self.remember_var = tk.BooleanVar(value=bool(self._settings.get("remember_aprs_settings", True)))
 
-        ttk.Label(stations, text="APRS callsign").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Entry(stations, textvariable=self.callsign_var, width=22).grid(row=1, column=1, sticky="w", padx=(12, 0), pady=3)
-        ttk.Label(stations, text="Optional; read-only APRS-IS works with N0CALL if blank.").grid(row=1, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(settings, text="APRS callsign").grid(row=0, column=0, sticky="w")
+        ttk.Entry(settings, textvariable=self.callsign_var, width=13).grid(row=0, column=1, padx=(5, 12))
+        ttk.Label(settings, text="aprs.fi key").grid(row=0, column=2, sticky="w")
+        ttk.Entry(settings, textvariable=self.aprsfi_var, show="•", width=20).grid(row=0, column=3, padx=(5, 12))
+        ttk.Label(settings, text="Live sample (s)").grid(row=0, column=4, sticky="w")
+        ttk.Entry(settings, textvariable=self.refresh_var, width=6).grid(row=0, column=5, padx=(5, 12))
+        ttk.Checkbutton(settings, text="Remember", variable=self.remember_var).grid(row=0, column=6, sticky="w")
 
-        ttk.Label(stations, text="aprs.fi API key").grid(row=2, column=0, sticky="w", pady=3)
-        ttk.Entry(stations, textvariable=self.aprsfi_var, show="•", width=28).grid(row=2, column=1, sticky="w", padx=(12, 0), pady=3)
-        ttk.Label(stations, text="Optional; resolves discovered calls with missing positions.").grid(row=2, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(settings, text="Seed/fallback").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(settings, textvariable=self.source_var).grid(row=1, column=1, columnspan=6, sticky="ew", padx=(5, 6), pady=(6, 0))
+        ttk.Button(settings, text="Browse…", command=self._browse_source).grid(row=1, column=7, sticky="e", pady=(6, 0))
 
-        ttk.Label(stations, text="Live refresh (sec)").grid(row=3, column=0, sticky="w", pady=3)
-        ttk.Entry(stations, textvariable=self.refresh_var, width=10).grid(row=3, column=1, sticky="w", padx=(12, 0), pady=3)
-        ttk.Checkbutton(
-            stations,
-            text="Remember APRS settings on this computer",
-            variable=self.remember_var,
-        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self.workspace = ViewshedWorkspace(outer, self)
+        self.workspace.pack(fill="both", expand=True)
 
-        types = ttk.Frame(stations)
-        types.grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        self.digi_var = tk.BooleanVar(value=True)
-        self.igate_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(types, text="Digipeaters", variable=self.digi_var).pack(side="left")
-        ttk.Checkbutton(types, text="iGates", variable=self.igate_var).pack(side="left", padx=(18, 0))
-        ttk.Label(
-            stations,
-            text="The area-aware station cache is reused for up to 6 hours. When stale or for a different area, APRS-IS is sampled live; aprs.fi is used only when a key is supplied.",
-            wraplength=710,
-        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
-
-        actions = ttk.Frame(outer)
-        actions.pack(fill="x", pady=(14, 0))
-        self.generate_btn = ttk.Button(actions, text="Generate Viewshed", command=self._generate)
-        self.generate_btn.pack(side="left")
-        ttk.Button(actions, text="Map / Corrections…", command=self._open_map_workspace).pack(side="left", padx=(8, 0))
-        self.open_btn = ttk.Button(actions, text="Open Output Folder", command=self._open_output, state="disabled")
-        self.open_btn.pack(side="left", padx=(8, 0))
-        ttk.Label(actions, text=f"Data root: {portable_data_root()}").pack(side="right")
-
-        status_frame = ttk.LabelFrame(outer, text="Job status", padding=10)
-        status_frame.pack(fill="x", pady=(12, 0))
+        status = ttk.Frame(outer)
+        status.pack(fill="x", pady=(8, 0))
         self.status_var = tk.StringVar(value="Ready")
         self.percent_var = tk.StringVar(value="0%")
-        status_row = ttk.Frame(status_frame)
-        status_row.pack(fill="x")
-        ttk.Label(status_row, textvariable=self.status_var).pack(side="left")
-        ttk.Label(status_row, textvariable=self.percent_var).pack(side="right")
-        self.progress = ttk.Progressbar(status_frame, orient="horizontal", mode="determinate", maximum=100)
-        self.progress.pack(fill="x", pady=(7, 0))
+        ttk.Label(status, textvariable=self.status_var).pack(side="left")
+        ttk.Label(status, textvariable=self.percent_var).pack(side="right")
+        self.progress = ttk.Progressbar(outer, orient="horizontal", mode="determinate", maximum=100)
+        self.progress.pack(fill="x", pady=(3, 0))
 
-        log_frame = ttk.LabelFrame(outer, text="Detailed progress", padding=8)
-        log_frame.pack(fill="both", expand=True, pady=(10, 0))
-        self.log = tk.Text(log_frame, height=16, wrap="word", state="disabled")
-        scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
+        details = ttk.LabelFrame(outer, text="Propagation job log", padding=5)
+        details.pack(fill="x", pady=(5, 0))
+        self.log = tk.Text(details, height=6, wrap="word", state="disabled")
+        scroll = ttk.Scrollbar(details, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         self.log.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-    @staticmethod
-    def _field(parent: ttk.Frame, row: int, label: str, variable: tk.StringVar) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
-        ttk.Entry(parent, textvariable=variable, width=24).grid(row=row, column=1, sticky="w", padx=(18, 0), pady=3)
-
     def _browse_source(self) -> None:
-        chosen = filedialog.askopenfilename(
-            title="Choose station JSON",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
+        chosen = filedialog.askopenfilename(title="Choose station JSON", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
         if chosen:
             self.source_var.set(chosen)
+            self.workspace.reload_station_catalog()
 
-    def _open_map_workspace(self) -> None:
-        if self._map_workspace is not None and self._map_workspace.winfo_exists():
-            self._map_workspace.lift()
-            self._map_workspace.focus_force()
-            return
-        self._map_workspace = MapWorkspace(self)
-
-    def _apply_station_settings(self) -> None:
+    def apply_network_settings(self) -> None:
         refresh = int(self.refresh_var.get())
         if not 0 <= refresh <= 300:
-            raise ValueError("Live refresh must be between 0 and 300 seconds.")
+            raise ValueError("Live sample time must be between 0 and 300 seconds.")
         callsign = self.callsign_var.get().strip().upper()
         api_key = self.aprsfi_var.get().strip()
-        if callsign:
-            os.environ["VIEWSHED_APRS_CALLSIGN"] = callsign
-        else:
-            os.environ.pop("VIEWSHED_APRS_CALLSIGN", None)
-        if api_key:
-            os.environ["VIEWSHED_APRSFI_API_KEY"] = api_key
-        else:
-            os.environ.pop("VIEWSHED_APRSFI_API_KEY", None)
+        if callsign: os.environ["VIEWSHED_APRS_CALLSIGN"] = callsign
+        else: os.environ.pop("VIEWSHED_APRS_CALLSIGN", None)
+        if api_key: os.environ["VIEWSHED_APRSFI_API_KEY"] = api_key
+        else: os.environ.pop("VIEWSHED_APRSFI_API_KEY", None)
         os.environ["VIEWSHED_LIVE_REFRESH_SECONDS"] = str(refresh)
         os.environ[USER_OVERRIDE_ENV] = str(user_override_path())
         if self.remember_var.get():
@@ -220,53 +141,19 @@ class ViewshedApp(tk.Tk):
         else:
             _settings_path().unlink(missing_ok=True)
 
-    def _set_progress(self, percent: int, status: str) -> None:
-        percent = max(0, min(100, percent))
-        self.progress["value"] = percent
-        self.percent_var.set(f"{percent}%")
-        self.status_var.set(status)
-
-    def _update_progress_from_log(self, line: str) -> None:
-        """Translate legacy worker messages into stable user-facing stages."""
-        text = line.strip()
-        if not text:
+    def start_job(self, job_file: Path, label: str) -> None:
+        if self._job_running:
+            messagebox.showwarning("Propagation already running", "Finish the current propagation job before starting another.", parent=self)
             return
-
-        stages = (
-            (("Refreshing station cache", "Using cached station data", "Station cache:"), 8, "Step 1 of 6 — Acquiring APRS stations"),
-            (("Station acquisition selected", "Using "), 18, "Step 1 of 6 — Station list ready"),
-            (("DEM cache:", "Tiles required:", "Source: USGS"), 25, "Step 2 of 6 — Preparing elevation data"),
-            (("Downloading N", "Merging "), 35, "Step 2 of 6 — Downloading / assembling terrain"),
-            (("Building memory-bounded analysis DEM", "Analysis DEM ready", "Reprojecting DEM"), 48, "Step 3 of 6 — Preparing analysis terrain"),
-            (("Engine:", "Workers:", "DEM in shared memory"), 58, "Step 4 of 6 — Computing station viewsheds"),
-            (("stations resolved", "Merging viewshed", "Merging "), 78, "Step 5 of 6 — Combining coverage"),
-            (("Rendering coverage", "Building per-station PNGs", "Rendering KML", "Writing KMZ", "KMZ:"), 90, "Step 6 of 6 — Rendering and exporting results"),
-        )
-        for needles, percent, status in stages:
-            if any(needle in text for needle in needles):
-                if percent >= int(float(self.progress["value"])):
-                    self._set_progress(percent, status)
-                return
-
-    def _generate(self) -> None:
         try:
-            self._apply_station_settings()
-            region = Region(float(self.lat_var.get()), float(self.lon_var.get()), float(self.radius_var.get()))
-            propagation = float(self.propagation_var.get())
-            types = set()
-            if self.digi_var.get():
-                types.add("digi")
-            if self.igate_var.get():
-                types.add("igate")
-            _, job_file = prepare_job(region, Path(self.source_var.get()), types, propagation)
+            self.apply_network_settings()
         except Exception as exc:
-            messagebox.showerror("Cannot start viewshed", str(exc))
+            messagebox.showerror("Invalid settings", str(exc), parent=self)
             return
-
-        self.generate_btn.configure(state="disabled")
+        self._job_running = True
         self.open_btn.configure(state="disabled")
-        self._set_progress(2, "Starting viewshed job…")
-        self._append_log(f"Starting job: {job_file.parent}\n")
+        self._set_progress(2, f"Starting {label} propagation…")
+        self._append_log(f"\nStarting {label} job: {job_file.parent}\n")
         threading.Thread(target=self._run_job, args=(job_file,), daemon=True).start()
 
     def _run_job(self, job_file: Path) -> None:
@@ -296,10 +183,31 @@ class ViewshedApp(tk.Tk):
             code = process.wait()
             if code != 0:
                 raise RuntimeError(f"Viewshed worker exited with code {code}.")
-            self._last_output = job_file.parent / "output"
-            self._messages.put(("done", str(self._last_output)))
+            self._messages.put(("done", str(job_file.parent / "output")))
         except Exception as exc:
             self._messages.put(("error", str(exc)))
+
+    def _set_progress(self, percent: int, status: str) -> None:
+        percent = max(0, min(100, percent))
+        self.progress["value"] = percent
+        self.percent_var.set(f"{percent}%")
+        self.status_var.set(status)
+
+    def _update_progress_from_log(self, line: str) -> None:
+        text = line.strip()
+        stages = (
+            (("Station acquisition selected", "Using "), 15, "Station list locked"),
+            (("DEM cache:", "Tiles required:", "Source: USGS"), 28, "Preparing elevation data"),
+            (("Downloading N", "Merging "), 38, "Downloading / assembling terrain"),
+            (("Analysis DEM ready", "Building memory-bounded analysis DEM"), 50, "Preparing analysis terrain"),
+            (("Engine:", "Workers:", "DEM in shared memory"), 60, "Computing propagation"),
+            (("stations resolved", "Merging viewshed"), 80, "Combining coverage"),
+            (("Rendering coverage", "Writing KMZ", "KMZ:"), 92, "Rendering and exporting"),
+        )
+        for needles, percent, status in stages:
+            if any(n in text for n in needles):
+                if percent >= int(float(self.progress["value"])): self._set_progress(percent, status)
+                break
 
     def _drain_messages(self) -> None:
         try:
@@ -309,16 +217,17 @@ class ViewshedApp(tk.Tk):
                     self._update_progress_from_log(text)
                     self._append_log(text)
                 elif kind == "done":
-                    self.generate_btn.configure(state="normal")
+                    self._job_running = False
+                    self._last_output = Path(text)
                     self.open_btn.configure(state="normal")
                     self._set_progress(100, "Complete — outputs are ready")
                     self._append_log(f"\nComplete. Output: {text}\n")
-                    messagebox.showinfo("Viewshed complete", f"Outputs are ready in:\n{text}")
+                    messagebox.showinfo("Viewshed complete", f"Outputs are ready in:\n{text}", parent=self)
                 elif kind == "error":
-                    self.generate_btn.configure(state="normal")
-                    self.status_var.set("Failed — see detailed progress below")
+                    self._job_running = False
+                    self.status_var.set("Failed — see propagation job log")
                     self._append_log(f"\nERROR: {text}\n")
-                    messagebox.showerror("Viewshed failed", text)
+                    messagebox.showerror("Viewshed failed", text, parent=self)
         except queue.Empty:
             pass
         self.after(100, self._drain_messages)
@@ -330,15 +239,11 @@ class ViewshedApp(tk.Tk):
         self.log.configure(state="disabled")
 
     def _open_output(self) -> None:
-        if not self._last_output:
-            return
+        if not self._last_output: return
         path = str(self._last_output)
-        if sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
+        if sys.platform == "win32": os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin": subprocess.Popen(["open", path])
+        else: subprocess.Popen(["xdg-open", path])
 
 
 def parse_args() -> argparse.Namespace:
