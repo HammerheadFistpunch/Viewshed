@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import os
 import queue
 import subprocess
@@ -193,6 +194,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    multiprocessing.freeze_support()
     args = parse_args()
     if args.self_test:
         print(self_test())
