@@ -1,23 +1,29 @@
 # Viewshed
 
-Viewshed is a portable APRS RF coverage generator built around a shared terrain/propagation foundation. The desktop application now uses a map-first workflow for Area, Station, Custom/future-station, and station-location correction tasks.
+Viewshed is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes all feed the same DEM -> terrain profile -> Longley-Rice/ITM -> path-loss -> link-margin foundation.
 
-## Current application direction
+## Quick links
 
-The application is being developed around these principles:
+- [Quick Start](docs/QUICK_START.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Propagation Model](docs/PROPAGATION_MODEL.md)
+- [Station Data](docs/STATION_DATA.md)
+- [Location Corrections](docs/LOCATION_CORRECTIONS.md)
+- [Outputs](docs/OUTPUTS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md)
+- [Special Considerations](docs/SPECIAL_CONSIDERATIONS.md)
+- [Roadmap](docs/ROADMAP.md)
 
-- one common DEM -> terrain profile -> ITM/Longley-Rice -> path loss -> link-margin pipeline
-- Area, Station, and Custom modes differ by explicit site/radio inputs rather than hidden changes to propagation math
-- APRS station acquisition is live-first with optional cache, aprs.fi resolution, and seed/fallback data
-- station-location confidence and reviewed corrections are kept outside the RF math
-- large DEM requests are memory-bounded rather than requiring a full native mosaic in RAM
-- Windows packaging remains a single portable executable with `ViewshedData` used for persistent cache, jobs, seeds, settings, and user corrections
+The packaged Windows application includes these documents offline under **Help / About**.
 
 ## Current UI modes
 
 ### Area
 
-Choose an area on the map, acquire the station list first, inspect/correct questionable station locations, then run propagation on the reviewed/frozen station set.
+Choose an analysis region, acquire the station list first, inspect/correct questionable locations, then run propagation on the reviewed/frozen station set.
+
+The station range field is a **maximum calculation range**, not a physical RF boundary. If modeled margin is still positive at that range, coverage can end in a clean circular arc.
 
 ### Station
 
@@ -25,29 +31,67 @@ Select one known digi/iGate and run the same propagation engine for that individ
 
 ### Custom
 
-Click a proposed site on the map and supply explicit radio parameters such as antenna height, power, gain, frequency, and analysis radius.
+Click a proposed site and supply explicit antenna height, transmitter power, gain, frequency, and analysis range. Custom mode uses its own site-specific radio settings.
 
 ### Corrections
 
-Compare the reported and model coordinates for a station, visually propose a replacement location, save it as a review candidate, or approve it as a reviewed correction. Reviewed corrections change the model coordinate while preserving the originally reported position and provenance.
+Review reported/model coordinates, topographic context, location confidence, freshness, and OpenStreetMap communications-site corroboration. OSM can improve confidence in an existing coordinate, but it never silently relocates a station. Reviewed corrections change the model coordinate while preserving the reported coordinate and provenance.
 
-## Station acquisition and seed data
+### Advanced
 
-Normal Area discovery does not require a seed file, APRS callsign, or aprs.fi API key. Viewshed can connect receive-only to APRS-IS and use live infrastructure/position observations. Optional cache, aprs.fi resolution, and local seed files improve continuity and completeness.
+Area and Station assumptions can be changed and persisted, including:
 
-A built-in **Build Seed...** tool can perform a longer APRS collection session and save a reusable JSON seed under `ViewshedData/seeds/`.
+- operational path-loss cap
+- TX/RX power/gain/sensitivity assumptions
+- antenna/observer heights
+- frequency
+- radial count
+- margin display bounds
+- worker DEM resolution
+- ITM climate/refractivity/ground/polarization parameters
 
-See [station acquisition](docs/station-acquisition.md) for more detail.
+The current default Area/Station operational path-loss cap is **148 dB**. Use **Reset to Viewshed defaults** to restore the reference profile.
+
+### Help / About
+
+Provides offline access to the README, Quick Start, User Guide, model documentation, station/correction/output guides, troubleshooting, dependencies/licenses, special considerations, roadmap, and the active `ViewshedData` folder.
+
+## Station acquisition
+
+Normal Area discovery does not require a seed file, APRS callsign, or aprs.fi API key. Viewshed can use receive-only APRS-IS sampling, then merge cache and optional seed/fallback records.
+
+A built-in **Build Seed…** tool performs a longer APRS collection and saves reusable JSON under `ViewshedData/seeds/`.
+
+Viewshed also cross-references nearby OpenStreetMap communications infrastructure through Overpass when available. Strong geographic agreement is used as independent corroboration of an existing station coordinate. Missing timestamps are treated as freshness information rather than coordinate inaccuracy.
+
+## Reference Area/Station profile
+
+Current defaults include:
+
+- Frequency: 144.390 MHz
+- TX power: 47 dBm (50 W)
+- TX antenna gain: 0 dBd
+- RX sensitivity: -119 dBm
+- RX antenna gain: +2 dBd
+- Operational path-loss cap: 148 dB
+- Digipeater antenna height: 20 m AGL
+- iGate antenna height: 3 m AGL
+- Observer/receiver height: 2 m AGL
+- Radials: 720 per station
+
+These are explicit modeling assumptions, not measured installation data for each APRS site.
 
 ## Outputs
 
-Job outputs are written under:
+Jobs are written under:
 
 ```text
 ViewshedData/jobs/<timestamp>/output/
 ```
 
-Current primary products include Google Earth KMZ and GeoTIFF coverage data. The current roadmap calls for simplifying the default visualization from a continuous heatmap toward categorical coverage and infrastructure-overlap products while retaining raw link-margin data for technical use.
+After completion, the UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**. A running job can be stopped with **Cancel Run**; shared DEM cache files are preserved.
+
+The combined Area product is primarily a **coverage overlap** product (number of modeled infrastructure sites meeting the operational threshold), while per-station rasters retain modeled link-margin information.
 
 ## Run from source
 
@@ -58,13 +102,7 @@ python -m pip install -r requirements.txt
 python viewshed_app.py
 ```
 
-Or double-click:
-
-```text
-run_viewshed.bat
-```
-
-The legacy backend remains in `aprs_viewshed_utah_parallel.py` for regression comparison while propagation responsibilities continue to be migrated into focused modules.
+Or use `run_viewshed.bat` on Windows.
 
 ## Build the Windows executable
 
@@ -80,7 +118,7 @@ The resulting executable is:
 dist/Viewshed.exe
 ```
 
-A lightweight packaged smoke test is available:
+A packaged smoke test is available:
 
 ```bash
 Viewshed.exe --self-test
@@ -90,7 +128,7 @@ GitHub Actions builds and smoke-tests the Windows executable on pushes to `main`
 
 ## Station JSON format
 
-Viewshed accepts a JSON list or an object containing a `stations`, `results`, or `data` list. Each usable record needs at least:
+Viewshed accepts a JSON list or an object containing a `stations`, `results`, or `data` list. A usable record needs at least:
 
 ```json
 {
@@ -103,39 +141,26 @@ Viewshed accepts a JSON list or an object containing a `stations`, `results`, or
 
 `type` is currently expected to be `digi` or `igate`.
 
-## Architecture direction
+## Architecture
 
 ```text
-Map-first GUI / CLI
+Map-first GUI
        |
-Region + job controller
+Area / Station / Custom / Corrections / Advanced
        |
-Station source -> confidence/corrections -> frozen station set
+Station source -> confidence + OSM corroboration + reviewed corrections
        |
-Terrain source -> DEM/cache -> memory-bounded analysis DEM
+Frozen station set
        |
-Propagation engine
+USGS terrain -> DEM cache -> memory-bounded analysis DEM
        |
-KMZ / GeoTIFF exporters
+Longley-Rice/ITM + link-margin engine
+       |
+Coverage overlap / KMZ / GeoTIFF
 ```
-
-`viewshed_core.py` owns region/job/station filtering, portable data locations, correction registry integration, and worker-controller responsibilities. The larger original propagation script remains the backend while its working ITM/raster implementation is migrated incrementally rather than rewritten all at once.
-
-## Roadmap
-
-The active roadmap is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
-
-Current priorities are:
-
-1. Cancel a running propagation job.
-2. Improve completion/output actions in the UI.
-3. Replace or simplify the current heatmap with categorical coverage and overlap products.
-4. Add a topographic basemap for station corrections.
-5. Build the complete documentation set.
-6. Add an About / Help interface with documentation, dependency/license information, and special considerations.
-7. Reuse DEM data for elevation/hillshade assistance during corrections.
-8. Add terrain-based location plausibility warnings without automatically relocating stations.
 
 ## Scope and modeling caution
 
-Viewshed generates predicted VHF coverage. APRS positions may be incomplete or wrong, station installation parameters are usually unknown, and Area/Station modes therefore use explicit reference assumptions rather than claiming exact station ERP/antenna data. Coverage should be treated as a planning/analysis prediction, not a communications guarantee.
+Viewshed generates predicted VHF coverage. APRS positions and infrastructure inventories can be incomplete; actual station ERP, antenna pattern, feedline loss, clutter, foliage, local noise, weather, and receiver installation are not fully known or modeled. Coverage should be treated as a planning/analysis prediction, not a communications guarantee.
+
+The legacy propagation backend still contains Utah-oriented validation/CRS assumptions. Map display and station acquisition are more general than the propagation engine; full nationwide/generalized propagation remains future work.
