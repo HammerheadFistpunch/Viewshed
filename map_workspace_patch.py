@@ -2,27 +2,163 @@ from __future__ import annotations
 
 from tkinter import messagebox, ttk
 
-from map_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from map_workspace import ViewshedWorkspace as _ViewshedWorkspace, save_user_override
+from viewshed_core import assess_station_locations
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
     """UI fixes layered over the map workspace while the UI is evolving."""
 
     def __init__(self, master, app) -> None:
+        # This flag must exist before the base constructor runs because the base
+        # constructor loads the station catalog and dispatches to our overridden
+        # _refresh_correction_catalog method.
+        self._correction_show_all = False
+        self._correction_catalog_source: list[dict] = []
         super().__init__(master, app)
         self._install_correction_map_controls()
+        self._refresh_correction_catalog(self._correction_catalog_source or None)
 
     def _install_correction_map_controls(self) -> None:
         controls = ttk.Frame(self.corrections_tab, padding=4)
         controls.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
-        ttk.Button(controls, text="Topo", command=self._use_topo_map).pack(side="left")
+
+        self.review_filter_btn = ttk.Button(
+            controls,
+            text="Show All",
+            command=self._toggle_correction_filter,
+        )
+        self.review_filter_btn.pack(side="left")
+        ttk.Button(controls, text="Next", command=self._next_correction).pack(side="left", padx=(4, 0))
+        ttk.Button(controls, text="Topo", command=self._use_topo_map).pack(side="left", padx=(12, 0))
         ttk.Button(controls, text="Standard", command=self._use_standard_map).pack(side="left", padx=(4, 0))
+
         self.correction_attribution = ttk.Label(
             self.corrections_tab,
             text="Topo: © OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)",
         )
         self.correction_attribution.place(relx=1.0, rely=1.0, anchor="se", x=-12, y=-8)
         self._use_topo_map()
+        self._update_filter_button()
+
+    def _update_filter_button(self) -> None:
+        if hasattr(self, "review_filter_btn"):
+            self.review_filter_btn.configure(
+                text="Needs Review" if self._correction_show_all else "Show All"
+            )
+
+    def _toggle_correction_filter(self) -> None:
+        self._correction_show_all = not self._correction_show_all
+        self._update_filter_button()
+        self._refresh_correction_catalog(self._correction_catalog_source or None)
+
+    @staticmethod
+    def _confidence_score(record: dict) -> int:
+        meta = record.get("_location_confidence") or {}
+        try:
+            return int(meta.get("score", 999))
+        except (TypeError, ValueError):
+            return 999
+
+    @staticmethod
+    def _needs_location_review(record: dict) -> bool:
+        meta = record.get("_location_confidence") or {}
+        label = str(meta.get("label") or "").upper()
+        return label == "LOW" or bool(record.get("_location_review_candidate"))
+
+    def _refresh_correction_catalog(self, records: list[dict] | None = None) -> None:
+        if records is None:
+            try:
+                records = self._station_source_records()
+            except Exception:
+                records = []
+        self._correction_catalog_source = list(records)
+        assessed = assess_station_locations(records)
+        self._correction_records = {
+            str(r.get("callsign") or "").upper(): r
+            for r in assessed
+            if r.get("callsign") and "lat" in r and "lon" in r
+        }
+
+        all_calls = sorted(
+            self._correction_records,
+            key=lambda call: (self._confidence_score(self._correction_records[call]), call),
+        )
+        review_calls = [
+            call for call in all_calls
+            if self._needs_location_review(self._correction_records[call])
+        ]
+        visible_calls = all_calls if self._correction_show_all else review_calls
+        self.correct_combo["values"] = visible_calls
+
+        current = self.correct_call.get().strip().upper()
+        if current not in visible_calls:
+            self.correct_call.set(visible_calls[0] if visible_calls else "")
+
+        if hasattr(self, "correct_status"):
+            mode = "all stations" if self._correction_show_all else "needs review"
+            self.correct_status.set(
+                f"Showing {len(visible_calls)} {mode}; {len(review_calls)} of "
+                f"{len(all_calls)} stations need review. Lowest confidence is first."
+            )
+        self._correction_selected()
+
+    def _next_correction(self) -> None:
+        calls = list(self.correct_combo.cget("values") or ())
+        if not calls:
+            self.correct_status.set("No stations in the current correction filter.")
+            return
+        current = self.correct_call.get().strip().upper()
+        try:
+            idx = calls.index(current)
+        except ValueError:
+            idx = -1
+        next_idx = idx + 1
+        if next_idx >= len(calls):
+            self.correct_status.set("End of the current correction list.")
+            return
+        self.correct_call.set(calls[next_idx])
+        self._correction_selected()
+
+    def _advance_after_save(self, saved_call: str, previous_calls: list[str]) -> None:
+        current_calls = list(self.correct_combo.cget("values") or ())
+        if not current_calls:
+            self.correct_call.set("")
+            self._correction_selected()
+            self.correct_status.set("Review queue complete — no stations remain in this filter.")
+            return
+
+        try:
+            old_index = previous_calls.index(saved_call)
+        except ValueError:
+            old_index = -1
+
+        if saved_call in current_calls:
+            target_index = old_index + 1
+        else:
+            # A reviewed station normally disappears from the default Needs
+            # Review queue. The station that followed it shifts into its index.
+            target_index = max(0, old_index)
+
+        if target_index >= len(current_calls):
+            self.correct_status.set("Saved. End of the current correction list.")
+            return
+
+        self.correct_call.set(current_calls[target_index])
+        self._correction_selected()
+
+    def open_correction(self, callsign: str) -> None:
+        call = str(callsign or "").strip().upper()
+        self._refresh_correction_catalog(self._area_records or None)
+        if call in self._correction_records:
+            visible = list(self.correct_combo.cget("values") or ())
+            if call not in visible:
+                self._correction_show_all = True
+                self._update_filter_button()
+                self._refresh_correction_catalog(self._area_records or None)
+            self.correct_call.set(call)
+            self._correction_selected()
+        self.notebook.select(self.corrections_tab)
 
     def _use_topo_map(self) -> None:
         self.correction_map.set_tile_server(
@@ -81,10 +217,13 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         reported_lat, reported_lon = reported
 
         conf = rec.get("_location_confidence") or {}
+        reasons = conf.get("reasons") or []
+        reason_text = "; ".join(str(r) for r in reasons)
         self.correct_info.set(
             f"Reported: {reported_lat:.6f}, {reported_lon:.6f}\n"
             f"Model: {model_lat:.6f}, {model_lon:.6f}\n"
-            f"Confidence: {conf.get('label','?')} ({conf.get('score','?')}/100)"
+            f"Confidence: {conf.get('label','?')} ({conf.get('score','?')}/100)\n"
+            f"Why: {reason_text or 'No confidence details'}"
         )
         self.correction_map.set_marker(reported_lat, reported_lon, text=f"{call} reported")
 
@@ -129,4 +268,42 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self.correction_map.set_marker(lat, lon, text=f"{call or 'Station'} proposed")
         self.correct_lat.set(f"{lat:.6f}")
         self.correct_lon.set(f"{lon:.6f}")
-        self.correct_status.set(f"Proposed point: {lat:.6f}, {lon:.6f} — save as candidate or approve when ready.")
+        self.correct_status.set(
+            f"Proposed point: {lat:.6f}, {lon:.6f} — save as candidate or approve when ready."
+        )
+
+    def _save_correction(self, status: str) -> None:
+        call = self.correct_call.get().strip().upper()
+        if not call:
+            return
+        proposal = self._coordinate_pair(self.correct_lat.get().strip(), self.correct_lon.get().strip())
+        if proposal is None:
+            messagebox.showerror(
+                "Invalid correction",
+                "Enter a valid latitude and longitude, or click the map to choose a point.",
+                parent=self,
+            )
+            return
+        lat, lon = proposal
+        if status == "reviewed" and not messagebox.askyesno(
+            "Approve location correction",
+            f"Use {lat:.6f}, {lon:.6f} as the propagation location for {call}?\n\n"
+            "The APRS-reported location will still be preserved.",
+            parent=self,
+        ):
+            return
+
+        previous_calls = list(self.correct_combo.cget("values") or ())
+        save_user_override(
+            call,
+            {
+                "status": status,
+                "lat": lat,
+                "lon": lon,
+                "reason": self.correct_reason.get().strip(),
+                "source": self.correct_source.get().strip() or "Visual review in Viewshed",
+            },
+        )
+        self.correct_status.set(f"Saved {status} location for {call}.")
+        self._after_correction_change(call)
+        self._advance_after_save(call, previous_calls)
