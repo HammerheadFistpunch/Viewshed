@@ -11,8 +11,8 @@ SOURCE_BASE_SCORES = {
     "APRS-IS": 90,
     "aprs.fi": 85,
     "reviewed_override": 100,
-    "seed": 60,
-    "cache": 65,
+    "seed": 65,
+    "cache": 70,
     "unknown": 55,
 }
 
@@ -90,7 +90,11 @@ def _score_record(record: dict, registry_entry: dict | None, now: float) -> tupl
         reasons.append("position seen within 7 days")
 
     if record.get("_seed_only"):
-        score = min(score, 50)
+        # A seed-only position is unconfirmed live, but that alone should not
+        # make nearly every useful fallback station LOW confidence. A normal
+        # seed with no timestamp now lands at 55 (MEDIUM); genuinely stale seed
+        # data can still fall below the LOW threshold.
+        score = min(score, 65)
         reasons.append("seed-only coordinate; not confirmed live")
 
     if registry_entry:

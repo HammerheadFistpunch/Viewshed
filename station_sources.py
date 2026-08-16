@@ -45,7 +45,21 @@ def _merge_records(*groups: Iterable[dict]) -> list[dict]:
             normalized = dict(record)
             normalized["callsign"] = call
             old = merged.get(call, {})
-            merged[call] = {**old, **{k: v for k, v in normalized.items() if v not in (None, "")}}
+            combined = {**old, **{k: v for k, v in normalized.items() if v not in (None, "")}}
+
+            # Provenance flags describe the coordinate currently in the record,
+            # not the callsign forever. If a live/APRS.fi position supersedes a
+            # seed coordinate, do not retain a stale _seed_only flag from an
+            # earlier merge. This was incorrectly forcing live positions into
+            # the LOW-confidence bucket.
+            if (
+                normalized.get("_source") in {"APRS-IS", "aprs.fi", "reviewed_override"}
+                and normalized.get("lat") not in (None, "")
+                and normalized.get("lon") not in (None, "")
+            ):
+                combined.pop("_seed_only", None)
+
+            merged[call] = combined
     return sorted(merged.values(), key=lambda r: r["callsign"])
 
 
