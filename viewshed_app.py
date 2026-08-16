@@ -12,6 +12,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from map_workspace import MapWorkspace, USER_OVERRIDE_ENV, user_override_path
 from viewshed_core import (
     APP_VERSION,
     Region,
@@ -59,11 +60,13 @@ def _save_settings(settings: dict) -> None:
 class ViewshedApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
+        os.environ[USER_OVERRIDE_ENV] = str(user_override_path())
         self.title(f"Viewshed {APP_VERSION}")
         self.geometry("800x790")
         self.minsize(720, 660)
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
+        self._map_workspace: MapWorkspace | None = None
         self._settings = _load_settings()
         self._build_ui()
         self.after(100, self._drain_messages)
@@ -147,6 +150,7 @@ class ViewshedApp(tk.Tk):
         actions.pack(fill="x", pady=(14, 0))
         self.generate_btn = ttk.Button(actions, text="Generate Viewshed", command=self._generate)
         self.generate_btn.pack(side="left")
+        ttk.Button(actions, text="Map / Corrections…", command=self._open_map_workspace).pack(side="left", padx=(8, 0))
         self.open_btn = ttk.Button(actions, text="Open Output Folder", command=self._open_output, state="disabled")
         self.open_btn.pack(side="left", padx=(8, 0))
         ttk.Label(actions, text=f"Data root: {portable_data_root()}").pack(side="right")
@@ -183,6 +187,13 @@ class ViewshedApp(tk.Tk):
         if chosen:
             self.source_var.set(chosen)
 
+    def _open_map_workspace(self) -> None:
+        if self._map_workspace is not None and self._map_workspace.winfo_exists():
+            self._map_workspace.lift()
+            self._map_workspace.focus_force()
+            return
+        self._map_workspace = MapWorkspace(self)
+
     def _apply_station_settings(self) -> None:
         refresh = int(self.refresh_var.get())
         if not 0 <= refresh <= 300:
@@ -198,6 +209,7 @@ class ViewshedApp(tk.Tk):
         else:
             os.environ.pop("VIEWSHED_APRSFI_API_KEY", None)
         os.environ["VIEWSHED_LIVE_REFRESH_SECONDS"] = str(refresh)
+        os.environ[USER_OVERRIDE_ENV] = str(user_override_path())
         if self.remember_var.get():
             _save_settings({
                 "remember_aprs_settings": True,
