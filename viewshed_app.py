@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from map_workspace import ViewshedWorkspace
+from seed_builder import SeedBuilderDialog
 from viewshed_core import APP_VERSION, USER_OVERRIDE_ENV, portable_data_root, resource_path, run_legacy_worker, self_test, user_override_path
 
 
@@ -58,6 +59,7 @@ class ViewshedApp(tk.Tk):
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
         self._job_running = False
+        self._seed_builder: SeedBuilderDialog | None = None
         self._build_ui()
         self.after(100, self._drain_messages)
 
@@ -71,6 +73,7 @@ class ViewshedApp(tk.Tk):
         ttk.Label(header, text=f"v{APP_VERSION}  •  map-first VHF propagation workspace").pack(side="left", padx=(10, 0), pady=(7, 0))
         self.open_btn = ttk.Button(header, text="Open Last Output", command=self._open_output, state="disabled")
         self.open_btn.pack(side="right")
+        ttk.Button(header, text="Build Seed…", command=self._open_seed_builder).pack(side="right", padx=(0, 8))
 
         settings = ttk.LabelFrame(outer, text="Shared APRS / data settings", padding=8)
         settings.pack(fill="x", pady=(8, 8))
@@ -89,7 +92,7 @@ class ViewshedApp(tk.Tk):
         ttk.Entry(settings, textvariable=self.refresh_var, width=6).grid(row=0, column=5, padx=(5, 12))
         ttk.Checkbutton(settings, text="Remember", variable=self.remember_var).grid(row=0, column=6, sticky="w")
 
-        ttk.Label(settings, text="Seed/fallback").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(settings, text="Optional seed/fallback").grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(settings, textvariable=self.source_var).grid(row=1, column=1, columnspan=6, sticky="ew", padx=(5, 6), pady=(6, 0))
         ttk.Button(settings, text="Browse…", command=self._browse_source).grid(row=1, column=7, sticky="e", pady=(6, 0))
 
@@ -118,6 +121,13 @@ class ViewshedApp(tk.Tk):
         if chosen:
             self.source_var.set(chosen)
             self.workspace.reload_station_catalog()
+
+    def _open_seed_builder(self) -> None:
+        if self._seed_builder is not None and self._seed_builder.winfo_exists():
+            self._seed_builder.lift()
+            self._seed_builder.focus_force()
+            return
+        self._seed_builder = SeedBuilderDialog(self)
 
     def apply_network_settings(self) -> None:
         refresh = int(self.refresh_var.get())
