@@ -10,9 +10,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+from dem_sources import prepare_dem as prepare_usgs_dem
 from station_sources import acquire_station_cache
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 
 
 @dataclass(frozen=True)
@@ -198,7 +199,7 @@ def run_legacy_worker(job_file: Path) -> Path:
         raise RuntimeError("No valid stations remained after propagation-engine validation.")
     print(f"Using {len(stations)} station(s) in propagation engine.")
 
-    dem_path = engine.prepare_dem(stations, cfg, work_dir)
+    dem_path = prepare_usgs_dem(stations, cfg, work_dir)
     results = engine.compute_viewsheds(stations, dem_path, cfg, work_dir, colocation_map=colocation_map)
     if not results:
         raise RuntimeError("The propagation engine produced no station viewsheds.")
