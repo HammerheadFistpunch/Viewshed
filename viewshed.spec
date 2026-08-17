@@ -22,7 +22,7 @@ datas = [
     ("docs/OUTPUTS.md", "docs"),
     ("docs/TROUBLESHOOTING.md", "docs"),
     ("docs/LICENSES_AND_DEPENDENCIES.md", "docs"),
-    ("docs/RELEASE_AUDIT_1.0.0.md", "docs"),
+    ("docs/RELEASE_READINESS_1.0.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
