@@ -56,11 +56,6 @@ def _merge_records(*groups: Iterable[dict]) -> list[dict]:
             old = merged.get(call, {})
             combined = {**old, **{k: v for k, v in normalized.items() if v not in (None, "")}}
 
-            # Provenance flags describe the coordinate currently in the record,
-            # not the callsign forever. If a live/APRS.fi position supersedes a
-            # seed coordinate, do not retain a stale _seed_only flag from an
-            # earlier merge. This was incorrectly forcing live positions into
-            # the LOW-confidence bucket.
             if (
                 normalized.get("_source") in {"APRS-IS", "aprs.fi", "reviewed_override"}
                 and normalized.get("lat") not in (None, "")
@@ -232,9 +227,13 @@ def acquire_station_cache(seed_path: Path, data_root: Path, center_lat: float, c
     cache_path = cache_dir / "stations.json"
     seed_records = _load_records(seed_path)
     cached_records = _load_records(cache_path)
-    if not refresh or _cache_fresh(cache_path, center_lat, center_lon, acquisition_radius_km):
+
+    # refresh=True is an explicit request for a live APRS sample. Do not silently
+    # substitute a fresh cache; the cache and optional seed are merge/fallback
+    # sources, not replacements for the requested observation window.
+    if not refresh:
         if cache_path.exists():
-            print("Station cache is fresh for this area; skipping live refresh.")
+            print("Live refresh disabled; using station cache.")
             return cache_path
         payload = {"updated_at": time.time(), "stations": _merge_records(seed_records)}
         cache_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
