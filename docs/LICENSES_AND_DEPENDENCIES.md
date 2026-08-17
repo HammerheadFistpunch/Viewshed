@@ -1,8 +1,8 @@
-# Dependencies, Licenses, and Attribution
+# Signal Peak — Dependencies, Licenses, and Attribution
 
 ## Runtime dependencies
 
-Viewshed currently declares these Python runtime dependencies in `requirements.txt`:
+Signal Peak 1.0.0 declares these Python runtime dependencies in `requirements.txt`:
 
 | Dependency | Role |
 |---|---|
@@ -20,41 +20,54 @@ Viewshed currently declares these Python runtime dependencies in `requirements.t
 
 The Windows build additionally uses PyInstaller from `requirements-build.txt`.
 
-## License handling
+## Important release-license issue
 
-The repository does not attempt to replace upstream license texts with this summary. Binary redistributors should review and preserve notices required by the exact package versions included in a build. The authoritative license for each Python dependency is the license distributed by that upstream package/version.
+`aprslib` 0.7.2 is distributed under GNU GPLv2. Because Signal Peak imports aprslib and a PyInstaller build may bundle it into `SignalPeak.exe`, public binary distribution requires a GPL-aware licensing strategy. The repository does not currently choose a top-level Signal Peak project license.
 
-Because dependency versions are specified mostly as minimum versions, the exact dependency/license inventory of a packaged EXE can vary as build environments update. A release process should eventually capture a pinned dependency manifest and bundled notices for each release artifact.
+Before publishing a formal binary release, the copyright owner should either:
+
+1. choose a GPLv2-compatible project/distribution approach and satisfy corresponding source/notice requirements;
+2. replace/remove aprslib and repeat the license audit; or
+3. obtain separate permission from the aprslib copyright holder.
+
+See `docs/RELEASE_READINESS_1.0.0.md`.
+
+## Dependency inventory
+
+Most dependency entries currently specify minimum versions, so the exact package versions and notices included in a Windows binary can vary over time. A public release should capture the exact installed versions and preserve the license notices required by those versions.
+
+`itmlogic` is MIT-licensed. Its copyright/license notice must be preserved when distributing copies or substantial portions. Other direct and transitive dependency notices should be generated from the actual release environment rather than inferred only from this summary.
 
 ## Map and geographic-data attribution
 
 ### OpenStreetMap
 
-Viewshed uses OpenStreetMap-derived map data and may query OSM communications features through Overpass. OSM attribution must remain visible where required. OSM data is provided under the Open Database License (ODbL); consult OpenStreetMap's current copyright/attribution guidance before redistribution or publication.
+Signal Peak uses OpenStreetMap-derived map data and may query OSM communications features through Overpass. Visible attribution must remain present. OSM data is available under ODbL, while use of the public OSM tile service is also subject to its operational tile-usage policy.
 
 ### OpenTopoMap
 
-The Corrections topo layer uses OpenTopoMap raster tiles. The UI displays the required OpenStreetMap/OpenTopoMap attribution. Tile use is subject to the provider's current usage and attribution policy.
+The topo layer uses OpenTopoMap raster tiles. The UI displays OpenStreetMap/OpenTopoMap attribution. Tile use is subject to OpenTopoMap's current attribution and service policy.
 
 ### USGS 3DEP
 
-Viewshed downloads elevation data from USGS 3DEP/The National Map services for terrain analysis. USGS data and services have their own source/citation guidance; users publishing derived products should retain appropriate source acknowledgement.
+Signal Peak downloads USGS 3DEP/The National Map elevation data for terrain analysis. USGS 3DEP products are public-domain U.S. government data. Retaining USGS/3DEP source acknowledgement is recommended for provenance and reproducibility.
 
 ### APRS-IS and aprs.fi
 
-APRS-IS is used as a live receive source. aprs.fi is optional and used only when an API key is configured. Use of those services remains subject to their respective service terms and policies.
+APRS-IS is used as a live receive source. aprs.fi is optional and only used with a user-provided API key. Signal Peak 1.0.0 does not bundle a shared aprs.fi key and removes saved API keys from application settings. Public distribution using aprs.fi should follow the service's current API terms, including application identification, attribution, and contacting the service operator.
 
 ## Project license
 
-Before distributing Viewshed as a formal release, ensure the repository contains a clear top-level project license file and that it is compatible with all bundled dependencies and assets. This document intentionally does not invent a project license where the repository has not explicitly declared one.
+A top-level Signal Peak `LICENSE` has intentionally not been added by this cleanup because selecting the project's copyright license is a decision for the copyright owner. Public source visibility on GitHub is not a substitute for an explicit software license.
 
 ## Release checklist
 
-For a formal release:
-
-1. Pin dependency versions used for the release build.
-2. Export an exact dependency/version manifest.
-3. Bundle or link required third-party license notices.
-4. Preserve OSM/OpenTopoMap attribution in the UI.
-5. Document USGS elevation-data provenance.
-6. Verify APRS-IS/aprs.fi usage remains compatible with current service policies.
+1. Resolve the aprslib/GPLv2 strategy.
+2. Select a Signal Peak project license.
+3. Pin exact dependency versions for the release build.
+4. Export a dependency/version manifest or SBOM.
+5. Bundle required third-party license notices.
+6. Preserve OSM/OpenTopoMap attribution and follow tile-service policy.
+7. Document USGS 3DEP provenance.
+8. Follow aprs.fi distribution/API terms if that optional integration ships.
+9. Review the exact pinned dependency set for known vulnerabilities.
