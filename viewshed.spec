@@ -7,6 +7,7 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapvie
     hiddenimports += collect_submodules(package)
 
 datas = [
+    ("LICENSE", "."),
     ("utah_stations_scraped.json", "."),
     ("utah_seed_stations.csv", "."),
     ("station_location_overrides.json", "."),
