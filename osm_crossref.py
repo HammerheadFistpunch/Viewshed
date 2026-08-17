@@ -8,6 +8,7 @@ import requests
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 USER_AGENT = "Viewshed/0.3 (+https://github.com/HammerheadFistpunch/Viewshed)"
 DEFAULT_MATCH_RADIUS_KM = 3.0
+BATCH_SIZE = 25
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -52,7 +53,7 @@ def _overpass_query(points: list[tuple[str, float, float]], radius_m: int) -> st
                 f'nwr{around}["communication:mobile_phone"];',
             ]
         )
-    return "[out:json][timeout:30];(\n" + "\n".join(clauses) + "\n);out center tags;"
+    return "[out:json][timeout:12];(\n" + "\n".join(clauses) + "\n);out center tags;"
 
 
 def _feature_point(element: dict) -> tuple[float, float] | None:
@@ -103,49 +104,57 @@ def cross_reference_osm(
 ) -> dict[str, dict]:
     """Return nearest OSM communications feature for each station.
 
-    OSM is corroborating evidence only. A nearby communications structure does
-    not prove that the feature hosts the APRS station, so this function never
-    changes station coordinates or reviewed overrides.
+    Requests are intentionally batched and latency-bounded so a large seed cannot
+    make Area station acquisition appear frozen. OSM remains corroborating evidence
+    only and never changes coordinates on its own.
     """
     points = _usable_station_points(records)
     if not points:
         return {}
 
     radius_km = max(0.1, min(float(match_radius_km), 10.0))
-    query = _overpass_query(points, int(round(radius_km * 1000.0)))
-    response = requests.post(
-        OVERPASS_URL,
-        data={"data": query},
-        headers={"User-Agent": USER_AGENT},
-        timeout=45,
-    )
-    response.raise_for_status()
-    payload = response.json()
-
+    radius_m = int(round(radius_km * 1000.0))
     features: list[dict] = []
     seen_features: set[tuple[str, int]] = set()
-    for element in payload.get("elements", []):
+
+    for start in range(0, len(points), BATCH_SIZE):
+        batch = points[start:start + BATCH_SIZE]
+        query = _overpass_query(batch, radius_m)
         try:
-            feature_id = (str(element.get("type") or "?"), int(element["id"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if feature_id in seen_features:
-            continue
-        point = _feature_point(element)
-        if point is None:
-            continue
-        seen_features.add(feature_id)
-        tags = dict(element.get("tags") or {})
-        features.append(
-            {
-                "osm_type": feature_id[0],
-                "osm_id": feature_id[1],
-                "lat": point[0],
-                "lon": point[1],
-                "tags": tags,
-                "label": _feature_label(tags),
-            }
-        )
+            response = requests.post(
+                OVERPASS_URL,
+                data={"data": query},
+                headers={"User-Agent": USER_AGENT},
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            print(f"OSM cross-check batch unavailable: {exc}. Continuing without remaining OSM batches.")
+            break
+
+        for element in payload.get("elements", []):
+            try:
+                feature_id = (str(element.get("type") or "?"), int(element["id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if feature_id in seen_features:
+                continue
+            point = _feature_point(element)
+            if point is None:
+                continue
+            seen_features.add(feature_id)
+            tags = dict(element.get("tags") or {})
+            features.append(
+                {
+                    "osm_type": feature_id[0],
+                    "osm_id": feature_id[1],
+                    "lat": point[0],
+                    "lon": point[1],
+                    "tags": tags,
+                    "label": _feature_label(tags),
+                }
+            )
 
     matches: dict[str, dict] = {}
     for call, lat, lon in points:
