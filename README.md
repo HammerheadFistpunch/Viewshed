@@ -15,7 +15,7 @@ The 1.0.0 CONUS branch adds automatic local UTM-zone selection, map-based statio
 - [Outputs](docs/OUTPUTS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md)
-- [1.0 Legal / Security Audit](docs/RELEASE_AUDIT_1.0.0.md)
+- [1.0 Release Readiness](docs/RELEASE_READINESS_1.0.0.md)
 - [Special Considerations](docs/SPECIAL_CONSIDERATIONS.md)
 - [Roadmap](docs/ROADMAP.md)
 
@@ -116,7 +116,7 @@ GitHub Actions builds and smoke-tests the Windows executable on pushes to `CONUS
 
 ## Legal release status
 
-The codebase has been reviewed for release concerns, but **1.0.0 should not yet be treated as legally cleared for public binary redistribution**. The most important unresolved item is `aprslib`, which is GPLv2-licensed and is currently bundled as a runtime dependency. The repository also does not yet contain a top-level project license selected by the copyright owner. See [the 1.0 legal/security audit](docs/RELEASE_AUDIT_1.0.0.md) before publishing a public download.
+The codebase has been reviewed for release concerns, but **1.0.0 should not yet be treated as legally cleared for public binary redistribution**. The most important unresolved item is `aprslib`, which is GPLv2-licensed and is currently bundled as a runtime dependency. The repository also does not yet contain a top-level project license selected by the copyright owner. See [the 1.0 release-readiness review](docs/RELEASE_READINESS_1.0.0.md) before publishing a public download.
 
 ## Modeling caution
 
