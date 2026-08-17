@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from workspace_tuning import ViewshedWorkspace as _ViewshedWorkspace
+from repeat_run_workspace import ViewshedWorkspace as _ViewshedWorkspace
 from viewshed_core import APP_VERSION, portable_data_root, resource_path
 
 
