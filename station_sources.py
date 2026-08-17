@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Iterable
@@ -165,25 +166,53 @@ def _parse_position(raw_line: str) -> tuple[str, dict] | None:
     }
 
 
-def observe_aprs_is(center_lat: float, center_lon: float, radius_km: float, seconds: int, callsign: str = "N0CALL") -> tuple[list[dict], set[str]]:
+def observe_aprs_is(
+    center_lat: float,
+    center_lon: float,
+    radius_km: float,
+    seconds: int,
+    callsign: str = "N0CALL",
+    stop_event: threading.Event | None = None,
+    progress=None,
+) -> tuple[list[dict], set[str]]:
+    """Observe APRS-IS, reporting live counts and honoring cancellation."""
     seconds = max(0, min(int(seconds), 300))
+    stop_event = stop_event or threading.Event()
     if seconds == 0:
+        if progress:
+            progress(0, 0, 0, 0, 0)
         return [], set()
+
     callsign = _normalize_call(callsign) or "N0CALL"
     filter_text = f"r/{center_lat:.5f}/{center_lon:.5f}/{max(1, int(radius_km))}"
     login = f"user {callsign} pass -1 vers Viewshed 0.2 filter {filter_text}\r\n"
     positions: dict[str, dict] = {}
     digis: set[str] = set()
     igates: set[str] = set()
-    deadline = time.monotonic() + seconds
+    packets = 0
+    started = time.monotonic()
+    deadline = started + seconds
+    last_report = -1
+
+    def report(force: bool = False) -> None:
+        nonlocal last_report
+        if not progress:
+            return
+        elapsed = min(seconds, max(0, int(time.monotonic() - started)))
+        if force or elapsed != last_report:
+            progress(elapsed, seconds, len(digis | igates), len(positions), packets)
+            last_report = elapsed
+
     with socket.create_connection((APRS_HOST, APRS_PORT), timeout=15) as sock:
-        sock.settimeout(2)
+        sock.settimeout(1)
         sock.sendall(login.encode("ascii", errors="ignore"))
         buffer = ""
-        while time.monotonic() < deadline:
+        report(force=True)
+        while time.monotonic() < deadline and not stop_event.is_set():
             try:
                 chunk = sock.recv(65536)
             except socket.timeout:
+                report()
                 continue
             if not chunk:
                 break
@@ -193,6 +222,7 @@ def observe_aprs_is(center_lat: float, center_lon: float, radius_km: float, seco
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
+                packets += 1
                 d, i = _packet_roles(line)
                 digis.update(d)
                 igates.update(i)
@@ -202,6 +232,9 @@ def observe_aprs_is(center_lat: float, center_lon: float, radius_km: float, seco
                     positions[call] = rec
                     if rec.get("symbol") == "#":
                         digis.add(call)
+            report()
+        report(force=True)
+
     records: list[dict] = []
     roles = digis | igates
     for call in sorted(roles):
@@ -250,18 +283,28 @@ def lookup_aprs_fi(callsigns: Iterable[str], api_key: str) -> list[dict]:
     return records
 
 
-def acquire_station_cache(seed_path: Path, data_root: Path, center_lat: float, center_lon: float, acquisition_radius_km: float, refresh: bool = True, refresh_seconds: int = DEFAULT_REFRESH_SECONDS, callsign: str = "", aprs_fi_api_key: str = "") -> Path:
+def acquire_station_cache(
+    seed_path: Path,
+    data_root: Path,
+    center_lat: float,
+    center_lon: float,
+    acquisition_radius_km: float,
+    refresh: bool = True,
+    refresh_seconds: int = DEFAULT_REFRESH_SECONDS,
+    callsign: str = "",
+    aprs_fi_api_key: str = "",
+    stop_event: threading.Event | None = None,
+    progress=None,
+) -> Path:
     cache_dir = data_root / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / "stations.json"
     seed_records, seed_label = _seed_records(seed_path)
     cached_records = _load_records(cache_path)
+    stop_event = stop_event or threading.Event()
     if seed_records:
         print(f"Station baseline: {len(seed_records)} record(s) from {seed_label}.")
 
-    # refresh=True is an explicit request for a live APRS sample. Do not silently
-    # substitute a fresh cache; the cache and optional seed are merge/fallback
-    # sources, not replacements for the requested observation window.
     if not refresh:
         if cache_path.exists():
             print("Live refresh disabled; using station cache.")
@@ -275,17 +318,25 @@ def acquire_station_cache(seed_path: Path, data_root: Path, center_lat: float, c
     discovered_calls: set[str] = set()
     try:
         live_records, discovered_calls = observe_aprs_is(
-            center_lat, center_lon, acquisition_radius_km, refresh_seconds,
+            center_lat,
+            center_lon,
+            acquisition_radius_km,
+            refresh_seconds,
             callsign=callsign or os.environ.get("VIEWSHED_APRS_CALLSIGN", "N0CALL"),
+            stop_event=stop_event,
+            progress=progress,
         )
-        print(f"APRS-IS: {len(discovered_calls)} infrastructure calls observed; {len(live_records)} had positions in the live sample.")
+        print(
+            f"APRS-IS: {len(discovered_calls)} infrastructure calls observed; "
+            f"{len(live_records)} had positions in the live sample."
+        )
     except Exception as exc:
         print(f"APRS-IS refresh unavailable: {exc}. Using cached/seed station data.")
 
     key = aprs_fi_api_key or os.environ.get("VIEWSHED_APRSFI_API_KEY", "")
     fi_records: list[dict] = []
     unresolved = discovered_calls - {_record_key(r) for r in live_records}
-    if key and unresolved:
+    if key and unresolved and not stop_event.is_set():
         try:
             fi_records = lookup_aprs_fi(unresolved, key)
             print(f"aprs.fi: resolved {len(fi_records)} additional station position(s).")

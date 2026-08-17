@@ -9,6 +9,7 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapvie
 datas = [
     ("LICENSE", "."),
     ("assets/signal-peak-icon.svg", "assets"),
+    ("assets/signal-peak-icon.png", "assets"),
     ("utah_stations_scraped.json", "."),
     ("utah_seed_stations.csv", "."),
     ("station_location_overrides.json", "."),

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -11,10 +13,9 @@ from viewshed_core import portable_data_root, resource_path
 
 
 PRODUCT_NAME = "Signal Peak"
-PRODUCT_VERSION = "1.0.1"
+PRODUCT_VERSION = "1.0.2"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 
-# Apply release branding before viewshed_app imports APP_VERSION from viewshed_core.
 viewshed_core.APP_VERSION = PRODUCT_VERSION
 station_sources.USER_AGENT = f"SignalPeak/{PRODUCT_VERSION} (+{PRODUCT_HOME})"
 APP_VERSION = PRODUCT_VERSION
@@ -41,12 +42,17 @@ class ViewshedWorkspace(_ViewshedWorkspace):
     ]
 
     def __init__(self, master, app) -> None:
+        self._area_cancel_event = threading.Event()
+        self._log_window: tk.Toplevel | None = None
+        self._log_text: tk.Text | None = None
+        self._signal_peak_icon = None
         super().__init__(master, app)
         self._brand_application()
         self._install_secure_settings_storage()
         self._clarify_range_labels()
         self._install_area_activity_indicator()
         self._default_seed_field_empty()
+        self._install_window_icon()
         self._build_help_tab()
         self.after_idle(self._polish_progress_shell)
 
@@ -71,6 +77,24 @@ class ViewshedWorkspace(_ViewshedWorkspace):
                 visit(child)
 
         visit(self.app)
+
+    def _install_window_icon(self) -> None:
+        try:
+            icon_path = resource_path("assets/signal-peak-icon.png")
+            if not icon_path.exists():
+                return
+            self._signal_peak_icon = tk.PhotoImage(file=str(icon_path))
+            self.app.iconphoto(True, self._signal_peak_icon)
+        except Exception:
+            self._signal_peak_icon = None
+
+    def _apply_window_icon(self, window) -> None:
+        if self._signal_peak_icon is None:
+            return
+        try:
+            window.iconphoto(False, self._signal_peak_icon)
+        except Exception:
+            pass
 
     @staticmethod
     def _remove_saved_api_key() -> None:
@@ -127,62 +151,278 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         visit(self)
 
     def _default_seed_field_empty(self) -> None:
-        """Treat the seed as an opt-in fallback instead of exposing bundled data as a user seed."""
         try:
             self.app.source_var.set("")
         except Exception:
             pass
 
     def _install_area_activity_indicator(self) -> None:
-        """Keep Step 1 visibly active during APRS/cache/OSM station acquisition."""
         parent = self.find_area_btn.master
-        self.area_activity = ttk.Progressbar(parent, mode="indeterminate", maximum=100)
+        self.area_activity = ttk.Progressbar(parent, mode="determinate", maximum=100)
         self.area_activity.pack(fill="x", pady=(8, 0))
-        self.area_activity.stop()
+        self.area_activity["value"] = 0
 
-    def _set_area_activity(self, active: bool) -> None:
-        if active:
-            self.area_activity.start(12)
-            self.area_status.set(
-                "Finding stations — live APRS sampling, cache/seed merge, and location checks are running…"
+    def _set_area_progress(self, elapsed: int, total: int, roles: int, positions: int, packets: int) -> None:
+        total = max(0, int(total))
+        elapsed = max(0, min(int(elapsed), total)) if total else 0
+        remaining = max(0, total - elapsed)
+        pct = int(100 * elapsed / total) if total else 100
+        status = (
+            f"Finding stations — {remaining}s remaining · "
+            f"{roles} infrastructure calls · {positions} position packets"
+        )
+        self.area_activity["value"] = pct
+        self.area_status.set(status)
+        try:
+            self.app.progress["value"] = pct
+            self.app.percent_var.set(f"{pct}%")
+            self.app.status_var.set(status)
+        except Exception:
+            pass
+
+    def _restore_main_cancel_button(self) -> None:
+        try:
+            self.app.cancel_btn.configure(
+                text="Cancel Run",
+                command=self.app.cancel_job,
+                state="normal" if getattr(self.app, "_job_running", False) else "disabled",
             )
-        else:
-            self.area_activity.stop()
-            self.area_activity["value"] = 0
+        except Exception:
+            pass
+
+    def cancel_area_acquisition(self) -> None:
+        if not self._area_busy:
+            return
+        self._area_cancel_event.set()
+        try:
+            self.app.cancel_btn.configure(state="disabled")
+            self.app.status_var.set("Cancelling Step 1…")
+        except Exception:
+            pass
+        self.area_status.set("Cancelling station acquisition…")
 
     def find_area_stations(self) -> None:
-        was_busy = self._area_busy
-        super().find_area_stations()
-        if not was_busy and self._area_busy:
-            self._set_area_activity(True)
+        if self._area_busy:
+            return
+        try:
+            region, prop, types = self._area_values()
+            self.app.apply_network_settings()
+            refresh_seconds = int(self.app.refresh_var.get())
+        except Exception as exc:
+            messagebox.showerror("Cannot acquire stations", str(exc), parent=self)
+            return
+
+        self._area_cancel_event.clear()
+        self._area_busy = True
+        self.find_area_btn.configure(state="disabled")
+        self.run_area_btn.configure(state="disabled")
+        self.area_review_btn.configure(state="disabled")
+        self._set_area_progress(0, refresh_seconds, 0, 0, 0)
+        try:
+            self.app.cancel_btn.configure(
+                text="Cancel Step 1",
+                command=self.cancel_area_acquisition,
+                state="normal",
+            )
+        except Exception:
+            pass
+
+        def report(elapsed, total, roles, positions, packets):
+            self.after(
+                0,
+                lambda: self._set_area_progress(elapsed, total, roles, positions, packets),
+            )
+
+        def work():
+            try:
+                cache_path = station_sources.acquire_station_cache(
+                    seed_path=Path(self.app.source_var.get()),
+                    data_root=portable_data_root(),
+                    center_lat=region.center_lat,
+                    center_lon=region.center_lon,
+                    acquisition_radius_km=region.radius_km + prop,
+                    refresh=True,
+                    refresh_seconds=refresh_seconds,
+                    callsign=self.app.callsign_var.get().strip().upper(),
+                    aprs_fi_api_key=self.app.aprsfi_var.get().strip(),
+                    stop_event=self._area_cancel_event,
+                    progress=report,
+                )
+                if self._area_cancel_event.is_set():
+                    self.after(0, self._area_acquire_cancelled)
+                    return
+
+                self.after(
+                    0,
+                    lambda: self._set_area_post_sample_status(
+                        "Live sample complete — checking station locations…"
+                    ),
+                )
+                records = viewshed_core.assess_station_locations(
+                    viewshed_core.load_station_records(cache_path)
+                )
+                selected = viewshed_core.filter_stations(records, region, types, prop)
+
+                if self._area_cancel_event.is_set():
+                    self.after(0, self._area_acquire_cancelled)
+                    return
+
+                if selected:
+                    self.after(
+                        0,
+                        lambda: self._set_area_post_sample_status(
+                            f"Checking {len(selected)} station locations against OpenStreetMap…"
+                        ),
+                    )
+                    try:
+                        matches = viewshed_core.cross_reference_osm(selected, match_radius_km=3.0)
+                        attached = []
+                        for original in selected:
+                            record = dict(original)
+                            call = str(record.get("callsign") or "").strip().upper()
+                            if call in matches:
+                                record["_osm_crossref"] = dict(matches[call])
+                            attached.append(record)
+                        selected = viewshed_core.assess_station_locations(attached)
+                    except Exception:
+                        pass
+
+                if self._area_cancel_event.is_set():
+                    self.after(0, self._area_acquire_cancelled)
+                    return
+                self.after(0, lambda: self._area_acquired(selected))
+            except Exception as exc:
+                self.after(0, lambda e=exc: self._area_acquire_failed(e))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _set_area_post_sample_status(self, status: str) -> None:
+        self.area_activity["value"] = 100
+        self.area_status.set(status)
+        try:
+            self.app.progress["value"] = 100
+            self.app.percent_var.set("100%")
+            self.app.status_var.set(status)
+        except Exception:
+            pass
+
+    def _area_acquire_cancelled(self) -> None:
+        self._area_busy = False
+        self.find_area_btn.configure(state="normal")
+        self.area_activity["value"] = 0
+        self.area_status.set("Step 1 cancelled. Existing station results were not changed.")
+        try:
+            self.app.progress["value"] = 0
+            self.app.percent_var.set("0%")
+            self.app.status_var.set("Step 1 cancelled")
+        except Exception:
+            pass
+        self._restore_main_cancel_button()
 
     def _area_acquired(self, records: list[dict]) -> None:
-        self._set_area_activity(False)
+        self.area_activity["value"] = 100
         super()._area_acquired(records)
+        try:
+            self.app.progress["value"] = 100
+            self.app.percent_var.set("100%")
+            self.app.status_var.set(f"Step 1 complete — {len(records)} stations ready")
+        except Exception:
+            pass
+        self._restore_main_cancel_button()
 
     def _area_acquire_failed(self, exc: Exception) -> None:
-        self._set_area_activity(False)
+        self.area_activity["value"] = 0
         super()._area_acquire_failed(exc)
+        self._restore_main_cancel_button()
 
     def _polish_progress_shell(self) -> None:
-        """Give the run status and log enough space to remain useful at the default window size."""
+        """Detach the detailed run log from the main window."""
         try:
             style = ttk.Style(self.app)
             style.configure("SignalPeak.Horizontal.TProgressbar", thickness=12)
             self.app.progress.configure(style="SignalPeak.Horizontal.TProgressbar")
-            self.app.log.configure(
-                height=9,
-                font=("Consolas", 9),
-                padx=7,
-                pady=5,
-                relief="flat",
-                borderwidth=0,
-            )
+
             details = self.app.log.master
-            details.configure(text="Run progress & log", padding=8)
-            details.pack_configure(fill="x", pady=(6, 0))
+            details.pack_forget()
+
+            status = self.app.cancel_btn.master
+            self.open_log_btn = ttk.Button(status, text="Open Log", command=self.open_log_window)
+            self.open_log_btn.pack(side="right", padx=(8, 0))
+
+            original_append = self.app._append_log
+
+            def append_log(text: str) -> None:
+                original_append(text)
+                viewer = self._log_text
+                if viewer is not None and viewer.winfo_exists():
+                    viewer.configure(state="normal")
+                    viewer.insert("end", text)
+                    viewer.see("end")
+                    viewer.configure(state="disabled")
+
+            self.app._append_log = append_log
         except Exception:
             pass
+
+    def open_log_window(self) -> None:
+        if self._log_window is not None and self._log_window.winfo_exists():
+            self._log_window.deiconify()
+            self._log_window.lift()
+            self._log_window.focus_force()
+            return
+
+        window = tk.Toplevel(self.app)
+        self._log_window = window
+        window.title(f"{PRODUCT_NAME} — Run Log")
+        window.geometry("900x520")
+        window.minsize(640, 320)
+        self._apply_window_icon(window)
+
+        outer = ttk.Frame(window, padding=10)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="Run progress & log", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            outer,
+            text="Detailed diagnostics for station acquisition and propagation runs.",
+        ).pack(anchor="w", pady=(2, 8))
+
+        body = ttk.Frame(outer)
+        body.pack(fill="both", expand=True)
+        text = tk.Text(
+            body,
+            wrap="word",
+            state="normal",
+            font=("Consolas", 9),
+            padx=8,
+            pady=6,
+            relief="flat",
+            borderwidth=0,
+        )
+        scroll = ttk.Scrollbar(body, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        try:
+            existing = self.app.log.get("1.0", "end-1c")
+        except Exception:
+            existing = ""
+        if existing:
+            text.insert("end", existing)
+            text.see("end")
+        text.configure(state="disabled")
+        self._log_text = text
+
+        actions = ttk.Frame(outer)
+        actions.pack(fill="x", pady=(8, 0))
+        ttk.Button(actions, text="Close", command=window.destroy).pack(side="right")
+
+        def close() -> None:
+            self._log_text = None
+            self._log_window = None
+            window.destroy()
+
+        window.protocol("WM_DELETE_WINDOW", close)
 
     def _build_help_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=12)
@@ -226,7 +466,10 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             wraplength=900,
             justify="left",
         ).pack(anchor="w")
-        ttk.Button(data_box, text="Open Application Data Folder", command=self._open_data_folder).pack(anchor="w", pady=(8, 0))
+        row = ttk.Frame(data_box)
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Button(row, text="Open Application Data Folder", command=self._open_data_folder).pack(side="left")
+        ttk.Button(row, text="Open Log", command=self.open_log_window).pack(side="left", padx=(8, 0))
 
         caution = ttk.LabelFrame(tab, text="Key modeling caution", padding=10)
         caution.pack(fill="x", pady=(12, 0))
