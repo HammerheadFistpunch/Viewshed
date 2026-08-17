@@ -7,10 +7,13 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapvie
     hiddenimports += collect_submodules(package)
 
 datas = [
+    ("LICENSE", "."),
+    ("assets/signal-peak-icon.svg", "assets"),
     ("utah_stations_scraped.json", "."),
     ("utah_seed_stations.csv", "."),
     ("station_location_overrides.json", "."),
     ("README.md", "."),
+    ("docs/CONUS.md", "docs"),
     ("docs/ROADMAP.md", "docs"),
     ("docs/QUICK_START.md", "docs"),
     ("docs/USER_GUIDE.md", "docs"),
@@ -21,6 +24,7 @@ datas = [
     ("docs/OUTPUTS.md", "docs"),
     ("docs/TROUBLESHOOTING.md", "docs"),
     ("docs/LICENSES_AND_DEPENDENCIES.md", "docs"),
+    ("docs/RELEASE_READINESS_1.0.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
@@ -35,6 +39,7 @@ a = Analysis(
         "map_workspace",
         "map_workspace_patch",
         "advanced_workspace",
+        "repeat_run_workspace",
         "help_workspace",
         "osm_crossref",
         "seed_builder",
@@ -54,7 +59,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="Viewshed",
+    name="SignalPeak",
+    icon="build/signal_peak.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

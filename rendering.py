@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def install_rendering_fix(engine) -> None:
-    """Install nodata-safe per-station overlays and remove the misleading composite view."""
+    """Install nodata-safe per-station overlays and the CONUS projection adapter."""
 
     def raster_to_png_overlay(
         coverage_path: Path,
@@ -168,3 +168,9 @@ def install_rendering_fix(engine) -> None:
     engine.raster_to_png_overlay = raster_to_png_overlay
     engine._create_legend = create_clear_legend
     engine.build_kmz = build_kmz_without_composite
+
+    # Keep the legacy RF worker intact, but replace its Utah-only projection
+    # wrapper with a location-derived UTM projection for CONUS jobs.
+    from conus_support import install_conus_support
+
+    install_conus_support(engine)

@@ -1,9 +1,12 @@
-name: Build Windows executable
+name: Build Signal Peak Windows executable
 
 on:
   push:
-    branches: [main]
+    branches: [main, CONUS]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
@@ -25,18 +28,23 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-build.txt
 
+      - name: Generate Signal Peak application icon
+        shell: pwsh
+        run: |
+          python .\tools\build_icon.py
+
       - name: Build portable executable
         run: pyinstaller --clean --noconfirm viewshed.spec
 
       - name: Smoke test packaged executable
         shell: pwsh
         run: |
-          & .\dist\Viewshed.exe --self-test
+          & .\dist\SignalPeak.exe --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload Viewshed.exe
+      - name: Upload SignalPeak.exe
         uses: actions/upload-artifact@v4
         with:
-          name: Viewshed-Windows
-          path: dist/Viewshed.exe
+          name: Signal-Peak-Windows-1.0.0
+          path: dist/SignalPeak.exe
           if-no-files-found: error
