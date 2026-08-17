@@ -23,6 +23,7 @@ env/
 /aprs_viewshed_work/
 /aprs_coverage_utah.kmz
 /ViewshedData/
+/APRS dataset/
 
 # Build output
 /build/
