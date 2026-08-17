@@ -11,7 +11,7 @@ from viewshed_core import portable_data_root, resource_path
 
 
 PRODUCT_NAME = "Signal Peak"
-PRODUCT_VERSION = "1.0.0"
+PRODUCT_VERSION = "1.0.1"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 
 # Apply release branding before viewshed_app imports APP_VERSION from viewshed_core.
@@ -45,7 +45,10 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self._brand_application()
         self._install_secure_settings_storage()
         self._clarify_range_labels()
+        self._install_area_activity_indicator()
+        self._default_seed_field_empty()
         self._build_help_tab()
+        self.after_idle(self._polish_progress_shell)
 
     def _brand_application(self) -> None:
         self.app.title(f"{PRODUCT_NAME} {PRODUCT_VERSION}")
@@ -122,6 +125,64 @@ class ViewshedWorkspace(_ViewshedWorkspace):
                 visit(child)
 
         visit(self)
+
+    def _default_seed_field_empty(self) -> None:
+        """Treat the seed as an opt-in fallback instead of exposing bundled data as a user seed."""
+        try:
+            self.app.source_var.set("")
+        except Exception:
+            pass
+
+    def _install_area_activity_indicator(self) -> None:
+        """Keep Step 1 visibly active during APRS/cache/OSM station acquisition."""
+        parent = self.find_area_btn.master
+        self.area_activity = ttk.Progressbar(parent, mode="indeterminate", maximum=100)
+        self.area_activity.pack(fill="x", pady=(8, 0))
+        self.area_activity.stop()
+
+    def _set_area_activity(self, active: bool) -> None:
+        if active:
+            self.area_activity.start(12)
+            self.area_status.set(
+                "Finding stations — live APRS sampling, cache/seed merge, and location checks are running…"
+            )
+        else:
+            self.area_activity.stop()
+            self.area_activity["value"] = 0
+
+    def find_area_stations(self) -> None:
+        was_busy = self._area_busy
+        super().find_area_stations()
+        if not was_busy and self._area_busy:
+            self._set_area_activity(True)
+
+    def _area_acquired(self, records: list[dict]) -> None:
+        self._set_area_activity(False)
+        super()._area_acquired(records)
+
+    def _area_acquire_failed(self, exc: Exception) -> None:
+        self._set_area_activity(False)
+        super()._area_acquire_failed(exc)
+
+    def _polish_progress_shell(self) -> None:
+        """Give the run status and log enough space to remain useful at the default window size."""
+        try:
+            style = ttk.Style(self.app)
+            style.configure("SignalPeak.Horizontal.TProgressbar", thickness=12)
+            self.app.progress.configure(style="SignalPeak.Horizontal.TProgressbar")
+            self.app.log.configure(
+                height=9,
+                font=("Consolas", 9),
+                padx=7,
+                pady=5,
+                relief="flat",
+                borderwidth=0,
+            )
+            details = self.app.log.master
+            details.configure(text="Run progress & log", padding=8)
+            details.pack_configure(fill="x", pady=(6, 0))
+        except Exception:
+            pass
 
     def _build_help_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=12)
