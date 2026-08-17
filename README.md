@@ -1,72 +1,49 @@
-# Viewshed
+# Signal Peak 1.0.0
 
-Viewshed is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes all feed the same DEM -> terrain profile -> Longley-Rice/ITM -> path-loss -> link-margin foundation.
+**Signal Peak** is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes use the same terrain-profile, Longley-Rice/ITM, path-loss, and link-margin foundation.
 
-**Current development snapshot:** cancellation/output controls, topo/OSM-assisted corrections, 148 dB reference profile, persistent Advanced settings, and bundled offline Help/documentation are implemented. The next major technical work is DEM-assisted correction review and range-clipping diagnostics.
+The 1.0.0 CONUS branch adds automatic local UTM-zone selection, map-based station review/corrections, repeatable jobs in one application session, a longer-duration APRS seed builder, and the current conservative reference profile.
 
 ## Quick links
 
 - [Quick Start](docs/QUICK_START.md)
 - [User Guide](docs/USER_GUIDE.md)
+- [CONUS support](docs/CONUS.md)
 - [Propagation Model](docs/PROPAGATION_MODEL.md)
 - [Station Data](docs/STATION_DATA.md)
 - [Location Corrections](docs/LOCATION_CORRECTIONS.md)
 - [Outputs](docs/OUTPUTS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md)
+- [1.0 Legal / Security Audit](docs/RELEASE_AUDIT_1.0.0.md)
 - [Special Considerations](docs/SPECIAL_CONSIDERATIONS.md)
 - [Roadmap](docs/ROADMAP.md)
 
-The packaged Windows application includes these documents offline under **Help / About**.
+The packaged Windows application includes these documents under **Help / About**.
 
 ## Current UI modes
 
 ### Area
 
-Choose an analysis region, acquire the station list first, inspect/correct questionable locations, then run propagation on the reviewed/frozen station set.
-
-The station range field is a **maximum calculation range**, not a physical RF boundary. If modeled margin is still positive at that range, coverage can end in a clean circular arc.
+Choose an analysis region, acquire the station list, inspect/correct questionable locations, then run propagation on the reviewed station set. Clicking a new location after completion starts a fresh workflow without requiring an application restart.
 
 ### Station
 
-Select one known digi/iGate and run the same propagation engine for that individual site.
+Select one known digipeater or iGate and run the same propagation engine for that individual site.
 
 ### Custom
 
-Click a proposed site and supply explicit antenna height, transmitter power, gain, frequency, and analysis range. Custom mode uses its own site-specific radio settings.
+Click a proposed site and supply antenna height, transmitter power, gain, frequency, and maximum calculation range.
 
 ### Corrections
 
-Review reported/model coordinates, topographic context, location confidence, freshness, and OpenStreetMap communications-site corroboration. OSM can improve confidence in an existing coordinate, but it never silently relocates a station. Reviewed corrections change the model coordinate while preserving the reported coordinate and provenance.
+Review reported/model coordinates, topographic context, confidence, freshness, and OpenStreetMap communications-site corroboration. Reviewed corrections change the modeled coordinate while preserving the reported coordinate and provenance.
 
 ### Advanced
 
-Area and Station assumptions can be changed and persisted, including:
+Area and Station assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, radial count, display bounds, DEM resolution, and ITM environmental parameters.
 
-- operational path-loss cap
-- TX/RX power/gain/sensitivity assumptions
-- antenna/observer heights
-- frequency
-- radial count
-- margin display bounds
-- worker DEM resolution
-- ITM climate/refractivity/ground/polarization parameters
-
-The current default Area/Station operational path-loss cap is **148 dB**. Use **Reset to Viewshed defaults** to restore the reference profile.
-
-### Help / About
-
-Provides offline access to the README, Quick Start, User Guide, model documentation, station/correction/output guides, troubleshooting, dependencies/licenses, special considerations, roadmap, and the active `ViewshedData` folder.
-
-## Station acquisition
-
-Normal Area discovery does not require a seed file, APRS callsign, or aprs.fi API key. Viewshed can use receive-only APRS-IS sampling, then merge cache and optional seed/fallback records.
-
-A built-in **Build Seed…** tool performs a longer APRS collection and saves reusable JSON under `ViewshedData/seeds/`.
-
-Viewshed also cross-references nearby OpenStreetMap communications infrastructure through Overpass when available. Strong geographic agreement is used as independent corroboration of an existing station coordinate. Missing timestamps are treated as freshness information rather than coordinate inaccuracy.
-
-## Reference Area/Station profile
+## Reference profile
 
 Current defaults include:
 
@@ -75,13 +52,26 @@ Current defaults include:
 - TX antenna gain: 0 dBd
 - RX sensitivity: -119 dBm
 - RX antenna gain: +2 dBd
-- Operational path-loss cap: 148 dB
+- Operational path-loss cap: **138 dB**
 - Digipeater antenna height: 20 m AGL
 - iGate antenna height: 3 m AGL
 - Observer/receiver height: 2 m AGL
-- Radials: 720 per station
+- Radials: **1080 per station**
+- Reduced lateral radial gap fill
 
-These are explicit modeling assumptions, not measured installation data for each APRS site.
+These are explicit modeling assumptions, not measured installation data for each APRS site. Custom mode derives a site-specific budget and applies a 20 dB operational reserve.
+
+## CONUS behavior
+
+Signal Peak chooses the projected UTM CRS from the geographic center of each job. For example, Salt Lake City uses Zone 12N, Denver uses 13N, Los Angeles uses 11N, and New York City uses 18N. Terrain acquisition uses USGS 3DEP data derived from the requested geography rather than a fixed Utah extent.
+
+The legacy propagation module retains an old Utah-oriented filename internally to avoid a risky mechanical rewrite, but the active CONUS projection layer is no longer fixed to Utah.
+
+## Station acquisition
+
+Normal Area discovery can use receive-only APRS-IS sampling, then merge cache and optional seed/fallback records. A built-in **Build Seed…** tool performs longer APRS collection and saves reusable JSON under `ViewshedData/seeds/`.
+
+An aprs.fi API key is optional. Signal Peak 1.0.0 treats that key as **session-only** and removes it from persisted application settings.
 
 ## Outputs
 
@@ -91,9 +81,7 @@ Jobs are written under:
 ViewshedData/jobs/<timestamp>/output/
 ```
 
-After completion, the UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**. A running job can be stopped with **Cancel Run**; shared DEM cache files are preserved.
-
-The combined Area product is primarily a **coverage overlap** product (number of modeled infrastructure sites meeting the operational threshold), while per-station rasters retain modeled link-margin information.
+After completion, the UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**. Previous output buttons remain available until the next run starts.
 
 ## Run from source
 
@@ -103,8 +91,6 @@ Python 3.12 is recommended.
 python -m pip install -r requirements.txt
 python viewshed_app.py
 ```
-
-Or use `run_viewshed.bat` on Windows.
 
 ## Build the Windows executable
 
@@ -117,52 +103,21 @@ pyinstaller --clean --noconfirm viewshed.spec
 The resulting executable is:
 
 ```text
-dist/Viewshed.exe
+dist/SignalPeak.exe
 ```
 
 A packaged smoke test is available:
 
 ```bash
-Viewshed.exe --self-test
+SignalPeak.exe --self-test
 ```
 
-GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Viewshed-Windows` artifact.
+GitHub Actions builds and smoke-tests the Windows executable on pushes to `CONUS` and uploads the `Signal-Peak-Windows-1.0.0` artifact.
 
-## Station JSON format
+## Legal release status
 
-Viewshed accepts a JSON list or an object containing a `stations`, `results`, or `data` list. A usable record needs at least:
+The codebase has been reviewed for release concerns, but **1.0.0 should not yet be treated as legally cleared for public binary redistribution**. The most important unresolved item is `aprslib`, which is GPLv2-licensed and is currently bundled as a runtime dependency. The repository also does not yet contain a top-level project license selected by the copyright owner. See [the 1.0 legal/security audit](docs/RELEASE_AUDIT_1.0.0.md) before publishing a public download.
 
-```json
-{
-  "callsign": "EXAMPLE",
-  "type": "digi",
-  "lat": 40.7608,
-  "lon": -111.8910
-}
-```
+## Modeling caution
 
-`type` is currently expected to be `digi` or `igate`.
-
-## Architecture
-
-```text
-Map-first GUI
-       |
-Area / Station / Custom / Corrections / Advanced
-       |
-Station source -> confidence + OSM corroboration + reviewed corrections
-       |
-Frozen station set
-       |
-USGS terrain -> DEM cache -> memory-bounded analysis DEM
-       |
-Longley-Rice/ITM + link-margin engine
-       |
-Coverage overlap / KMZ / GeoTIFF
-```
-
-## Scope and modeling caution
-
-Viewshed generates predicted VHF coverage. APRS positions and infrastructure inventories can be incomplete; actual station ERP, antenna pattern, feedline loss, clutter, foliage, local noise, weather, and receiver installation are not fully known or modeled. Coverage should be treated as a planning/analysis prediction, not a communications guarantee.
-
-The legacy propagation backend still contains Utah-oriented validation/CRS assumptions. Map display and station acquisition are more general than the propagation engine; full nationwide/generalized propagation remains future work.
+Signal Peak generates predicted VHF coverage. APRS positions and infrastructure inventories can be incomplete; actual ERP, antenna pattern, feedline loss, clutter, foliage, local noise, weather, and receiver installation are not fully known or modeled. Results are planning/analysis predictions, not communications guarantees.
