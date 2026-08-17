@@ -25,6 +25,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
     DOCS = [
         ("README / project overview", "README.md"),
+        ("GNU GPL v2 License", "LICENSE"),
         ("Quick Start", "docs/QUICK_START.md"),
         ("User Guide", "docs/USER_GUIDE.md"),
         ("Propagation Model", "docs/PROPAGATION_MODEL.md"),
@@ -131,6 +132,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             tab,
             text=(
                 "Portable map-first APRS/VHF terrain propagation analysis for the continental United States. "
+                "Signal Peak is free and open-source software licensed under GNU GPL v2 only. "
                 "The documentation below is bundled with the application for offline access."
             ),
             wraplength=900,
