@@ -6,21 +6,19 @@ This document records release-readiness findings. It is not legal advice or a pr
 
 ## Legal status
 
-Signal Peak should not yet be treated as cleared for public binary redistribution.
+### Project license — resolved
 
-### Project license
+Signal Peak is licensed under the **GNU General Public License version 2 only (GPL-2.0-only)**. The repository contains the complete GPLv2 text in the top-level `LICENSE` file.
 
-The repository does not currently contain a top-level project LICENSE selected by the copyright owner. Choose an explicit license before a formal public release.
+Copyright notice used for the project documentation:
 
-### aprslib GPLv2 dependency
+`Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.`
 
-The runtime dependency aprslib 0.7.2 is published under GNU GPLv2. Signal Peak imports it for APRS packet parsing and PyInstaller may bundle it into the Windows executable. Before distributing the binary, choose one of these paths:
+### aprslib GPLv2 dependency — resolved by project licensing strategy
 
-- use a GPLv2-compatible project/distribution strategy and provide required source/notices;
-- replace aprslib with a suitably licensed parser and audit again; or
-- obtain separate permission from the aprslib copyright holder.
+The runtime dependency `aprslib` 0.7.2 is published under GNU GPLv2. Signal Peak imports it for APRS packet parsing and PyInstaller may bundle it into the Windows executable. Licensing Signal Peak as GPL-2.0-only provides a straightforward GPL-compatible distribution strategy.
 
-Making the application free of charge does not by itself remove software-license obligations.
+For public executable distribution, make the corresponding Signal Peak source available under GPLv2 and preserve applicable third-party copyright/license notices. Making the application free of charge does not by itself satisfy these obligations; the source and license terms must remain available to recipients.
 
 ### aprs.fi
 
@@ -40,7 +38,7 @@ This review did not perform a comprehensive trademark clearance for “Signal Pe
 
 ### API key persistence fixed
 
-Older builds could persist the optional aprs.fi API key in ViewshedData/settings.json. Signal Peak 1.0.0 removes any saved aprs_fi_api_key and keeps it session-only.
+Older builds could persist the optional aprs.fi API key in ViewshedData/settings.json. Signal Peak 1.0.0 removes any saved `aprs_fi_api_key` and keeps it session-only.
 
 ### Build reproducibility
 
@@ -62,12 +60,13 @@ The application consumes APRS packets, aprs.fi JSON, OSM/Overpass responses, map
 
 ### APRS-IS transport
 
-The APRS-IS receive connection currently uses plaintext TCP port 14580. The app uses receive-only pass -1 rather than a secret APRS password, but APRS traffic should not be treated as confidential.
+The APRS-IS receive connection currently uses plaintext TCP port 14580. The app uses receive-only `pass -1` rather than a secret APRS password, but APRS traffic should not be treated as confidential.
 
 ## Before public release
 
-- [ ] Select a Signal Peak project license.
-- [ ] Resolve the GPLv2 aprslib dependency strategy.
+- [x] Select a Signal Peak project license: GPL-2.0-only.
+- [x] Resolve the GPLv2 aprslib dependency strategy by using GPL-2.0-only for Signal Peak.
+- [ ] Provide corresponding source with or alongside every public binary release.
 - [ ] Contact aprs.fi if the optional API integration will ship.
 - [ ] Add aprs.fi credit when aprs.fi data is used.
 - [ ] Pin exact Python release dependencies and retain hashes/manifest.
@@ -78,4 +77,4 @@ The APRS-IS receive connection currently uses plaintext TCP port 14580. The app 
 - [ ] Consider code signing.
 - [ ] Perform a trademark/name clearance search for Signal Peak.
 
-If the goal is the fastest open-source release while retaining aprslib, a GPLv2-compatible distribution is the most straightforward path to evaluate. If the goal is MIT/BSD/Apache-style licensing or closed-source freeware, replace/remove aprslib first and rerun the license review.
+The project-license question is no longer a blocker. The remaining items are release-process, attribution, dependency, service-policy, provenance, and name-clearance tasks.
