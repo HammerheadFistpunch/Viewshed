@@ -17,8 +17,10 @@ station coordinate
     -> total modeled path loss
     -> remaining link margin
     -> per-station raster
-    -> combined overlap raster / KMZ / GeoTIFF
+    -> per-station KMZ overlays
 ```
+
+An internal station-count raster may still be produced as a merge/intermediate artifact, but it is no longer presented as the composite coverage view because overlapping modeled footprints are not a useful substitute for per-station link margin.
 
 ## Reference Area/Station profile
 
@@ -29,12 +31,13 @@ Default Area and Station assumptions are currently:
 - TX antenna gain: 0 dBd
 - RX sensitivity: -119 dBm
 - RX antenna gain: +2 dBd
-- Operational path-loss cap: 148 dB
+- Operational path-loss cap: 138 dB
 - Digipeater antenna height: 20 m AGL
 - iGate antenna height: 3 m AGL
 - Receiver/observer height: 2 m AGL
-- 720 radial directions per station
+- 1080 radial directions per station
 - 0 dB displayed operational margin floor
+- Reduced lateral radial gap fill (0.25 factor)
 
 These values are a reference profile because APRS normally does not provide reliable station ERP, antenna pattern, feedline loss, or installation-height metadata.
 
@@ -46,13 +49,15 @@ Viewshed uses:
 remaining link margin = operational path-loss budget - modeled path loss
 ```
 
-At the default 148 dB cap:
+At the default 138 dB cap:
 
 - positive margin means modeled loss is below the selected operational budget;
 - approximately 0 dB is the reference operational edge;
-- negative values are below the reference threshold.
+- negative values are below the reference threshold and are not rendered as operational coverage.
 
-The operational path-loss cap intentionally limits an otherwise more idealized transmitter/receiver link budget. It represents a practical modeling assumption rather than a physical constant.
+The operational path-loss cap intentionally limits an otherwise more idealized transmitter/receiver link budget. It represents a practical modeling assumption rather than a physical constant. The 138 dB reference cap is deliberately more conservative than the earlier 148 dB profile.
+
+Custom stations calculate their cap from the entered transmitter power and antenna gain, the reference receiver assumptions, and a 20 dB operational reserve. For example, a 5 W transmitter with 0 dBd TX gain produces a 138 dB operational cap under the reference receiver assumptions.
 
 ## Maximum calculation range
 
@@ -74,17 +79,13 @@ Viewshed obtains USGS 3DEP 1-arcsecond elevation data and maintains a shared DEM
 
 For large geographic requests, building and processing the complete native-resolution mosaic can require excessive memory. Viewshed therefore bounds analysis size and can merge/downsample directly to an analysis-safe raster. Small analyses retain substantially more native terrain detail; very large analyses trade resolution for bounded memory and practical runtime.
 
-## Worker resolution and radials
+## Worker resolution, radials, and canyon shadows
 
-The propagation worker crops terrain around each station and may downsample that crop to the configured worker maximum dimension. The default is 2500 pixels. The radial count controls angular sampling; the default is 720.
+The propagation worker crops terrain around each station and may downsample that crop to the configured worker maximum dimension. The default is 2500 pixels. The radial count controls angular sampling; the reference profile now uses 1080 radials.
 
-Higher settings can increase computation and memory use and do not automatically guarantee a more accurate result when the underlying station assumptions are uncertain.
+Coverage between sampled radials requires a small amount of raster gap filling. Earlier settings allowed this fill to spread too far sideways at long range and could visually leak coverage into terrain shadows or narrow canyons. The reference gap-fill factor is now reduced to 0.25. This does not make the terrain model perfect, but it limits interpolation to a much smaller neighborhood instead of treating nearby radial coverage as equivalent.
 
-## Coverage overlap
-
-The combined Area product counts how many station rasters predict operational coverage at each point. This is an infrastructure-overlap product rather than a continuous received-signal-strength measurement.
-
-Per-station rasters retain modeled link-margin information for technical inspection.
+Higher compute settings can increase computation and memory use and do not automatically guarantee a more accurate result when the underlying station assumptions are uncertain.
 
 ## Important unmodeled or simplified effects
 

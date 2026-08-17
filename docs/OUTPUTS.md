@@ -18,27 +18,23 @@ The UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF** after
 
 ## KMZ
 
-The KMZ is intended for visual inspection in Google Earth or another compatible viewer. It contains station placemarks and coverage overlays.
+The KMZ is intended for visual inspection in Google Earth or another compatible viewer. It contains station placemarks and **per-station** modeled coverage overlays.
 
-The combined Area overlay is best interpreted as **coverage overlap**: how many modeled stations meet the selected operational threshold at each location.
+The composite/combined coverage view has been removed from the KMZ. Overlap counts can be useful for GIS processing, but they do not communicate the modeled link margin of any particular station and were too easy to misread as a propagation result.
 
-Do not interpret the overlay as measured signal strength.
+Toggle individual station folders to compare predicted footprints and terrain shadows directly.
 
 ## GeoTIFF
 
-`coverage_count.tif` is the primary combined raster copied into the output directory. Per-station rasters may also exist under the work directory and retain modeled link-margin values.
+`coverage_count.tif` may still be written as an internal/analysis merge raster for compatibility and GIS processing. It counts how many per-station rasters have positive modeled margin at each grid cell; it is **not** a signal-strength surface.
 
-GeoTIFF output is useful for GIS analysis, archiving, and later processing.
+Per-station rasters under the work directory retain modeled link-margin values and are the more meaningful technical output when evaluating a particular station.
 
-## Coverage categories
-
-Current combined rendering groups overlap into operational categories such as:
-
-- one station
-- two to three stations
-- four or more stations
+## Per-station link margin
 
 Per-station modeled link margin uses 0 dB as the reference operational edge. Positive margin indicates remaining modeled budget; below-threshold values are not treated as reliable operational coverage.
+
+The displayed coverage therefore represents modeled operational margin for each station rather than a composite count category.
 
 ## Hard circular edges
 

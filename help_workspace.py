@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from advanced_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from workspace_tuning import ViewshedWorkspace as _ViewshedWorkspace
 from viewshed_core import APP_VERSION, portable_data_root, resource_path
 
 
@@ -102,10 +102,11 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             caution,
             text=(
                 "Area and Station results use explicit reference assumptions because APRS normally does not provide "
-                "reliable station ERP, antenna pattern, feedline loss, or installation-height data. The default "
-                "operational path-loss cap is 148 dB and can be changed in Advanced. Coverage is a prediction, "
-                "not a communications guarantee. A clean circular edge can be the configured maximum calculation "
-                "range rather than a physical RF boundary."
+                "reliable station ERP, antenna pattern, feedline loss, or installation-height data. The reference "
+                "profile now uses a 138 dB operational path-loss cap plus reduced lateral radial fill to avoid "
+                "overstating marginal canyon coverage. Custom mode uses a 20 dB operational reserve. Coverage is a "
+                "prediction, not a communications guarantee. A clean circular edge can be the configured maximum "
+                "calculation range rather than a physical RF boundary."
             ),
             wraplength=900,
         ).pack(anchor="w")
