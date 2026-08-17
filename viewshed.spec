@@ -66,6 +66,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=True,
+    hide_console="hide-early",
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -71,7 +71,7 @@ class SeedBuilderMapDialog(_SeedBuilderDialog):
         self.seed_map.add_left_click_map_command(self._seed_click)
         self.seed_attribution = ttk.Label(map_panel)
         self.seed_attribution.pack(anchor="e", pady=(3, 0))
-        self._set_seed_style("topo")
+        self._set_seed_style("standard")
         self._draw_seed_area(initial=True)
 
     def _set_seed_style(self, style: str) -> None:
@@ -112,6 +112,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         super().__init__(master, app)
         self._migrate_reference_profile()
         self._install_common_map_controls()
+        self._use_standard_map()
         self._replace_seed_builder_button()
 
     def _migrate_reference_profile(self) -> None:
@@ -160,7 +161,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
                 text="Standard",
                 command=lambda m=map_widget, a=attribution: _set_map_style(m, "standard", a),
             ).pack(side="left", padx=(4, 0))
-            _set_map_style(map_widget, "topo", attribution)
+            _set_map_style(map_widget, "standard", attribution)
 
     def _replace_seed_builder_button(self) -> None:
         def visit(widget) -> bool:
