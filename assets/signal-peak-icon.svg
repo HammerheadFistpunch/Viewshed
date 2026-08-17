@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Background circle for icon contrast -->
+  <rect width="32" height="32" rx="6" fill="#1E293B"/>
+
+  <!-- Secondary peak (background layer) -->
+  <polygon points="18,14 27,27 9,27" fill="#475569"/>
+  <!-- Secondary peak snow cap -->
+  <polygon points="18,14 20.25,17.25 19,16.5 18,17.5 17,16.5 15.75,17.25" fill="#CBD5E1"/>
+
+  <!-- Main mountain peak -->
+  <polygon points="12,6 23,27 1,27" fill="#0F172A"/>
+  
+  <!-- Main peak shadow side (right) -->
+  <polygon points="12,6 23,27 12,27" fill="#1E293B" opacity="0.5"/>
+
+  <!-- Main peak snow cap -->
+  <polygon points="12,6 15.3,12.3 13.5,11 12,13 10.5,11 8.7,12.3" fill="#F8FAFC"/>
+  <!-- Snow cap shadow side (right) -->
+  <polygon points="12,6 15.3,12.3 13.5,11 12,13 12,6" fill="#E2E8F0"/>
+</svg>
