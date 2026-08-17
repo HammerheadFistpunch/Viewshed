@@ -28,6 +28,11 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-build.txt
 
+      - name: Generate Signal Peak application icon
+        shell: pwsh
+        run: |
+          python .\tools\build_icon.py
+
       - name: Build portable executable
         run: pyinstaller --clean --noconfirm viewshed.spec
 
