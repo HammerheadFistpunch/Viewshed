@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import time
 from pathlib import Path
 from typing import Iterable
@@ -38,6 +39,34 @@ def _load_records(path: Path) -> list[dict]:
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
+
+
+def _bundled_station_baseline() -> Path:
+    """Return the packaged station baseline used when no user seed is selected."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / "utah_stations_scraped.json"
+
+
+def _seed_records(seed_path: Path) -> tuple[list[dict], str]:
+    """Resolve the active positional baseline without exposing it as a UI seed.
+
+    A real user-selected/Build Seed file wins. A blank seed field is represented
+    by Path(".") and falls back to the packaged baseline so short APRS-IS samples
+    can correlate digi/iGate role sightings with known station coordinates.
+    """
+    records = _load_records(seed_path)
+    if records:
+        return records, str(seed_path)
+
+    try:
+        custom_file = seed_path.is_file()
+    except OSError:
+        custom_file = False
+    if custom_file:
+        return [], str(seed_path)
+
+    bundled = _bundled_station_baseline()
+    return _load_records(bundled), str(bundled)
 
 
 def _record_key(record: dict) -> str:
@@ -225,8 +254,10 @@ def acquire_station_cache(seed_path: Path, data_root: Path, center_lat: float, c
     cache_dir = data_root / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / "stations.json"
-    seed_records = _load_records(seed_path)
+    seed_records, seed_label = _seed_records(seed_path)
     cached_records = _load_records(cache_path)
+    if seed_records:
+        print(f"Station baseline: {len(seed_records)} record(s) from {seed_label}.")
 
     # refresh=True is an explicit request for a live APRS sample. Do not silently
     # substitute a fresh cache; the cache and optional seed are merge/fallback
@@ -247,7 +278,7 @@ def acquire_station_cache(seed_path: Path, data_root: Path, center_lat: float, c
             center_lat, center_lon, acquisition_radius_km, refresh_seconds,
             callsign=callsign or os.environ.get("VIEWSHED_APRS_CALLSIGN", "N0CALL"),
         )
-        print(f"APRS-IS: {len(discovered_calls)} infrastructure calls observed; {len(live_records)} had positions.")
+        print(f"APRS-IS: {len(discovered_calls)} infrastructure calls observed; {len(live_records)} had positions in the live sample.")
     except Exception as exc:
         print(f"APRS-IS refresh unavailable: {exc}. Using cached/seed station data.")
 
