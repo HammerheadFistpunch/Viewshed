@@ -1,33 +1,101 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+import station_sources
+import viewshed_core
 from repeat_run_workspace import ViewshedWorkspace as _ViewshedWorkspace
-from viewshed_core import APP_VERSION, portable_data_root, resource_path
+from viewshed_core import portable_data_root, resource_path
+
+
+PRODUCT_NAME = "Signal Peak"
+PRODUCT_VERSION = "1.0.0"
+PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
+
+# Apply release branding before viewshed_app imports APP_VERSION from viewshed_core.
+viewshed_core.APP_VERSION = PRODUCT_VERSION
+station_sources.USER_AGENT = f"SignalPeak/{PRODUCT_VERSION} (+{PRODUCT_HOME})"
+APP_VERSION = PRODUCT_VERSION
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
-    """Workspace with Advanced controls plus bundled offline Help/About access."""
+    """Signal Peak workspace with bundled offline Help/About access."""
 
     DOCS = [
         ("README / project overview", "README.md"),
         ("Quick Start", "docs/QUICK_START.md"),
         ("User Guide", "docs/USER_GUIDE.md"),
         ("Propagation Model", "docs/PROPAGATION_MODEL.md"),
+        ("CONUS support", "docs/CONUS.md"),
         ("Station Data", "docs/STATION_DATA.md"),
         ("Location Corrections", "docs/LOCATION_CORRECTIONS.md"),
         ("Outputs", "docs/OUTPUTS.md"),
         ("Troubleshooting", "docs/TROUBLESHOOTING.md"),
         ("Dependencies / Licenses", "docs/LICENSES_AND_DEPENDENCIES.md"),
+        ("1.0 Legal / Security Audit", "docs/RELEASE_AUDIT_1.0.0.md"),
         ("Special Considerations", "docs/SPECIAL_CONSIDERATIONS.md"),
         ("Roadmap", "docs/ROADMAP.md"),
     ]
 
     def __init__(self, master, app) -> None:
         super().__init__(master, app)
+        self._brand_application()
+        self._install_secure_settings_storage()
         self._clarify_range_labels()
         self._build_help_tab()
+
+    def _brand_application(self) -> None:
+        self.app.title(f"{PRODUCT_NAME} {PRODUCT_VERSION}")
+
+        def visit(widget) -> None:
+            try:
+                text = widget.cget("text")
+            except Exception:
+                text = None
+            if text == "Viewshed":
+                try:
+                    widget.configure(text=PRODUCT_NAME)
+                except Exception:
+                    pass
+            try:
+                children = widget.winfo_children()
+            except Exception:
+                children = []
+            for child in children:
+                visit(child)
+
+        visit(self.app)
+
+    @staticmethod
+    def _remove_saved_api_key() -> None:
+        """Keep aprs.fi credentials session-only rather than writing them to disk."""
+        path = portable_data_root() / "settings.json"
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or "aprs_fi_api_key" not in raw:
+                return
+            raw.pop("aprs_fi_api_key", None)
+            path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _install_secure_settings_storage(self) -> None:
+        if getattr(self.app, "_signal_peak_secure_settings", False):
+            return
+        self._remove_saved_api_key()
+        original_apply = self.app.apply_network_settings
+
+        def secure_apply_network_settings():
+            result = original_apply()
+            self._remove_saved_api_key()
+            return result
+
+        self.app.apply_network_settings = secure_apply_network_settings
+        self.app._signal_peak_secure_settings = True
 
     def _clarify_range_labels(self) -> None:
         replacements = {
@@ -58,11 +126,11 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         tab = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(tab, text="Help / About")
 
-        ttk.Label(tab, text=f"Viewshed {APP_VERSION}", font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        ttk.Label(tab, text=f"{PRODUCT_NAME} {APP_VERSION}", font=("Segoe UI", 16, "bold")).pack(anchor="w")
         ttk.Label(
             tab,
             text=(
-                "Portable map-first APRS/VHF terrain propagation analysis. "
+                "Portable map-first APRS/VHF terrain propagation analysis for the continental United States. "
                 "The documentation below is bundled with the application for offline access."
             ),
             wraplength=900,
@@ -86,15 +154,16 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         ttk.Label(
             data_box,
             text=(
-                f"ViewshedData: {portable_data_root()}\n"
+                f"Application data: {portable_data_root()}\n"
                 "Advanced settings: ViewshedData/advanced_settings.json\n"
                 "Station corrections: ViewshedData/station_location_overrides.json\n"
-                "Jobs: ViewshedData/jobs/<timestamp>/"
+                "Jobs: ViewshedData/jobs/<timestamp>/\n"
+                "aprs.fi API keys are session-only and are not retained in settings.json."
             ),
             wraplength=900,
             justify="left",
         ).pack(anchor="w")
-        ttk.Button(data_box, text="Open ViewshedData Folder", command=self._open_data_folder).pack(anchor="w", pady=(8, 0))
+        ttk.Button(data_box, text="Open Application Data Folder", command=self._open_data_folder).pack(anchor="w", pady=(8, 0))
 
         caution = ttk.LabelFrame(tab, text="Key modeling caution", padding=10)
         caution.pack(fill="x", pady=(12, 0))
@@ -103,10 +172,9 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             text=(
                 "Area and Station results use explicit reference assumptions because APRS normally does not provide "
                 "reliable station ERP, antenna pattern, feedline loss, or installation-height data. The reference "
-                "profile now uses a 138 dB operational path-loss cap plus reduced lateral radial fill to avoid "
-                "overstating marginal canyon coverage. Custom mode uses a 20 dB operational reserve. Coverage is a "
-                "prediction, not a communications guarantee. A clean circular edge can be the configured maximum "
-                "calculation range rather than a physical RF boundary."
+                "profile uses a 138 dB operational path-loss cap plus reduced lateral radial fill to avoid overstating "
+                "marginal canyon coverage. Custom mode uses a 20 dB operational reserve. Coverage is a prediction, "
+                "not a communications guarantee."
             ),
             wraplength=900,
         ).pack(anchor="w")
@@ -129,4 +197,4 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         try:
             self.app._open_path(portable_data_root())
         except Exception as exc:
-            messagebox.showerror("Could not open ViewshedData", str(exc), parent=self)
+            messagebox.showerror("Could not open application data", str(exc), parent=self)
