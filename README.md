@@ -4,6 +4,14 @@
 
 The 1.0.0 CONUS branch adds automatic local UTM-zone selection, map-based station review/corrections, repeatable jobs in one application session, a longer-duration APRS seed builder, and the current conservative reference profile.
 
+## License
+
+Signal Peak is free and open-source software licensed under the **GNU General Public License version 2 only (GPL-2.0-only)**. See [LICENSE](LICENSE).
+
+You may use, study, modify, and redistribute Signal Peak under the GPLv2 terms. When distributing executable builds, make the corresponding source code and license information available as required by GPLv2. Third-party libraries, map services, datasets, and APIs retain their own licenses and terms; see [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md).
+
+Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.
+
 ## Quick links
 
 - [Quick Start](docs/QUICK_START.md)
@@ -114,9 +122,9 @@ SignalPeak.exe --self-test
 
 GitHub Actions builds and smoke-tests the Windows executable on pushes to `CONUS` and uploads the `Signal-Peak-Windows-1.0.0` artifact.
 
-## Legal release status
+## Public-release status
 
-The codebase has been reviewed for release concerns, but **1.0.0 should not yet be treated as legally cleared for public binary redistribution**. The most important unresolved item is `aprslib`, which is GPLv2-licensed and is currently bundled as a runtime dependency. The repository also does not yet contain a top-level project license selected by the copyright owner. See [the 1.0 release-readiness review](docs/RELEASE_READINESS_1.0.0.md) before publishing a public download.
+The project-license decision is now resolved: Signal Peak is GPL-2.0-only, matching the GPLv2 `aprslib` dependency strategy. Before publishing a binary download, the remaining release work is operational: provide corresponding source alongside the build, preserve third-party notices, satisfy service attribution/terms, pin and audit release dependencies, and publish a checksum. See [the 1.0 release-readiness review](docs/RELEASE_READINESS_1.0.0.md).
 
 ## Modeling caution
 
