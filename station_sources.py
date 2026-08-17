@@ -175,7 +175,7 @@ def observe_aprs_is(
     stop_event: threading.Event | None = None,
     progress=None,
 ) -> tuple[list[dict], set[str]]:
-    """Observe APRS-IS, reporting live counts and honoring cancellation."""
+    """Observe APRS-IS until the requested deadline, reconnecting as needed."""
     seconds = max(0, min(int(seconds), 300))
     stop_event = stop_event or threading.Event()
     if seconds == 0:
@@ -185,11 +185,12 @@ def observe_aprs_is(
 
     callsign = _normalize_call(callsign) or "N0CALL"
     filter_text = f"r/{center_lat:.5f}/{center_lon:.5f}/{max(1, int(radius_km))}"
-    login = f"user {callsign} pass -1 vers Viewshed 0.2 filter {filter_text}\r\n"
+    login = f"user {callsign} pass -1 vers SignalPeak 1.0.2 filter {filter_text}\r\n"
     positions: dict[str, dict] = {}
     digis: set[str] = set()
     igates: set[str] = set()
     packets = 0
+    reconnects = 0
     started = time.monotonic()
     deadline = started + seconds
     last_report = -1
@@ -203,37 +204,54 @@ def observe_aprs_is(
             progress(elapsed, seconds, len(digis | igates), len(positions), packets)
             last_report = elapsed
 
-    with socket.create_connection((APRS_HOST, APRS_PORT), timeout=15) as sock:
-        sock.settimeout(1)
-        sock.sendall(login.encode("ascii", errors="ignore"))
-        buffer = ""
-        report(force=True)
-        while time.monotonic() < deadline and not stop_event.is_set():
-            try:
-                chunk = sock.recv(65536)
-            except socket.timeout:
-                report()
-                continue
-            if not chunk:
+    report(force=True)
+    while time.monotonic() < deadline and not stop_event.is_set():
+        try:
+            remaining = max(1.0, deadline - time.monotonic())
+            with socket.create_connection((APRS_HOST, APRS_PORT), timeout=min(15.0, remaining)) as sock:
+                sock.settimeout(1)
+                sock.sendall(login.encode("ascii", errors="ignore"))
+                buffer = ""
+                while time.monotonic() < deadline and not stop_event.is_set():
+                    try:
+                        chunk = sock.recv(65536)
+                    except socket.timeout:
+                        report()
+                        continue
+                    if not chunk:
+                        reconnects += 1
+                        break
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        packets += 1
+                        d, i = _packet_roles(line)
+                        digis.update(d)
+                        igates.update(i)
+                        parsed = _parse_position(line)
+                        if parsed:
+                            call, rec = parsed
+                            positions[call] = rec
+                            if rec.get("symbol") == "#":
+                                digis.add(call)
+                    report()
+        except Exception as exc:
+            reconnects += 1
+            if time.monotonic() >= deadline or stop_event.is_set():
                 break
-            buffer += chunk.decode("utf-8", errors="replace")
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                packets += 1
-                d, i = _packet_roles(line)
-                digis.update(d)
-                igates.update(i)
-                parsed = _parse_position(line)
-                if parsed:
-                    call, rec = parsed
-                    positions[call] = rec
-                    if rec.get("symbol") == "#":
-                        digis.add(call)
+            print(f"APRS-IS connection interrupted ({exc}); reconnecting for remaining sample time...")
+            stop_event.wait(min(1.0, max(0.0, deadline - time.monotonic())))
+
+        if time.monotonic() < deadline and not stop_event.is_set():
             report()
-        report(force=True)
+            stop_event.wait(min(0.25, max(0.0, deadline - time.monotonic())))
+
+    report(force=True)
+    if reconnects:
+        print(f"APRS-IS: {reconnects} reconnect(s) during requested {seconds}s sample.")
 
     records: list[dict] = []
     roles = digis | igates
