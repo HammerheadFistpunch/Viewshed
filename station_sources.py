@@ -21,7 +21,16 @@ def _normalize_call(value: str) -> str:
 
 
 def _load_records(path: Path) -> list[dict]:
-    if not path.exists():
+    """Load an optional JSON station source.
+
+    A blank UI seed value becomes Path("."), so existence alone is not enough
+    to decide whether the path is a usable seed file. Missing paths,
+    directories, and other non-files all mean "no optional seed records".
+    """
+    try:
+        if not path.is_file():
+            return []
+    except OSError:
         return []
     raw = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(raw, dict):
