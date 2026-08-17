@@ -8,6 +8,7 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapvie
 
 datas = [
     ("LICENSE", "."),
+    ("assets/signal-peak-icon.svg", "assets"),
     ("utah_stations_scraped.json", "."),
     ("utah_seed_stations.csv", "."),
     ("station_location_overrides.json", "."),
@@ -59,6 +60,7 @@ exe = EXE(
     a.datas,
     [],
     name="SignalPeak",
+    icon="build/signal_peak.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
