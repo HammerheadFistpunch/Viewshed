@@ -163,7 +163,7 @@ class SeedBuilderDialog(tk.Toplevel):
         self.lat_var = tk.StringVar(value=lat)
         self.lon_var = tk.StringVar(value=lon)
         self.radius_var = tk.StringVar(value=radius)
-        self.duration_var = tk.StringVar(value="30")
+        self.duration_var = tk.StringVar(value="1")
         default_dir = portable_data_root() / "seeds"
         default_dir.mkdir(parents=True, exist_ok=True)
         self.output_var = tk.StringVar(value=str(default_dir / time.strftime("stations_%Y%m%d-%H%M%S.json")))
@@ -172,7 +172,7 @@ class SeedBuilderDialog(tk.Toplevel):
         self._row(form, 0, "Center latitude", self.lat_var)
         self._row(form, 1, "Center longitude", self.lon_var)
         self._row(form, 2, "Radius (km)", self.radius_var)
-        self._row(form, 3, "Duration (minutes)", self.duration_var)
+        self._row(form, 3, "Duration (hours)", self.duration_var)
         ttk.Label(form, text="Output JSON").grid(row=4, column=0, sticky="w", pady=3)
         ttk.Entry(form, textvariable=self.output_var).grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=3)
         ttk.Button(form, text="Browse…", command=self._browse).grid(row=4, column=2, padx=(6, 0), pady=3)
@@ -194,7 +194,7 @@ class SeedBuilderDialog(tk.Toplevel):
 
         ttk.Label(
             outer,
-            text="Tip: 30–60 minutes is much more likely than a 45-second sample to see periodic infrastructure beacons. Longer runs can be used when building a regional reference seed.",
+            text="Tip: enter any duration from 0.1 to 24 hours. A 1–6 hour collection is more likely to catch periodic infrastructure beacons than a short Area sample.",
             wraplength=570,
         ).pack(anchor="w", pady=(16, 0))
 
@@ -220,13 +220,13 @@ class SeedBuilderDialog(tk.Toplevel):
             lat = float(self.lat_var.get())
             lon = float(self.lon_var.get())
             radius = float(self.radius_var.get())
-            minutes = float(self.duration_var.get())
+            hours = float(self.duration_var.get())
             if not -90 <= lat <= 90 or not -180 <= lon <= 180:
                 raise ValueError("Invalid center latitude/longitude.")
             if not 1 <= radius <= 2000:
                 raise ValueError("Radius must be between 1 and 2000 km.")
-            if not 1 <= minutes <= 1440:
-                raise ValueError("Duration must be between 1 minute and 24 hours.")
+            if not 0.1 <= hours <= 24:
+                raise ValueError("Duration must be between 0.1 and 24 hours.")
             output = Path(self.output_var.get()).expanduser()
             if not output.name:
                 raise ValueError("Choose an output JSON file.")
@@ -240,7 +240,7 @@ class SeedBuilderDialog(tk.Toplevel):
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self.status_var.set("Connecting to APRS-IS…")
-        duration_seconds = int(minutes * 60)
+        duration_seconds = int(hours * 3600)
 
         def report(elapsed, total, roles, positions, packets):
             self.after(0, lambda: self._report(elapsed, total, roles, positions, packets))
@@ -270,7 +270,7 @@ class SeedBuilderDialog(tk.Toplevel):
         pct = min(100, int(100 * elapsed / max(total, 1)))
         self.progress["value"] = pct
         self.status_var.set(
-            f"Listening… {elapsed // 60}m {elapsed % 60:02d}s / {total // 60}m • "
+            f"Listening… {elapsed / 3600:.2f}h / {total / 3600:.2f}h • "
             f"{roles} infrastructure calls • {positions} position packets • {packets} packets"
         )
 
