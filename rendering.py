@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 import time
 import zipfile
 from pathlib import Path
 
 
+def _configure_console_encoding() -> None:
+    """Keep diagnostic Unicode from crashing Windows worker processes."""
+    # Spawned ProcessPool workers inherit these settings. Explicitly include
+    # an error policy so a decorative symbol can never abort RF computation.
+    os.environ["PYTHONIOENCODING"] = "utf-8:replace"
+    os.environ["PYTHONUTF8"] = "1"
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def install_rendering_fix(engine) -> None:
     """Install nodata-safe per-station overlays and the CONUS projection adapter."""
+    _configure_console_encoding()
 
     def raster_to_png_overlay(
         coverage_path: Path,
