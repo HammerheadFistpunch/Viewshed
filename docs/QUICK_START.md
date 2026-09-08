@@ -1,50 +1,56 @@
-# Viewshed Quick Start
+# Signal Peak Quick Start
 
-This is the shortest path from launching Viewshed to producing a coverage result.
+This is the shortest path from launching Signal Peak 1.1.0 to producing a coverage result.
 
-## 1. Launch Viewshed
+## 1. Launch Signal Peak
 
-Run `Viewshed.exe` from the extracted Windows package, or run `python viewshed_app.py` from source.
+Run `SignalPeak.exe` from the extracted Windows package, or run `python viewshed_app.py` from source.
 
-Viewshed stores persistent data beside the executable when possible under `ViewshedData/`. If that location is not writable, it falls back to a `ViewshedData` folder in the user home directory.
+Persistent data is stored under `ViewshedData/` beside the executable when possible, with a user-home fallback if that location is not writable.
 
 ## 2. Use Area mode
 
 1. Open **Area**.
 2. Click the map or enter a center latitude/longitude.
 3. Set **Area radius** for the region you want to inspect.
-4. Set the station **maximum calculation range**. This is a hard outer computation limit for each station, not a predicted RF boundary.
+4. Set **Max calculation range** for each station. This is a hard computation limit, not a predicted RF boundary.
 5. Choose Digipeaters and/or iGates.
 6. Click **Find stations**.
 
-Viewshed samples APRS-IS, merges cache/seed data, applies reviewed corrections, and cross-checks nearby OpenStreetMap communications infrastructure when available. Finding stations does not run the terrain propagation engine.
+Signal Peak samples APRS-IS, merges cache/seed data, applies reviewed corrections, and can cross-check nearby OpenStreetMap communications infrastructure. Finding stations does not run the terrain propagation engine.
 
 ## 3. Review station locations
 
-If the Area panel reports stations needing review, open **Corrections**.
+If the Area panel reports stations needing review, open **Corrections**. Use the topo/standard basemap, OSM cross-check, and human-reviewed correction tools as needed. OSM corroboration does not automatically relocate a station.
 
-- The default list shows stations that need review.
-- Use **Next** to move through the queue.
-- A topographic basemap is available.
-- OSM matches are corroborating evidence only.
-- **Use OSM point** copies a matched OSM location into the proposal fields but does not approve it automatically.
-- **Approve correction** changes the modeled coordinate while preserving the APRS-reported coordinate.
+## 4. Set radio and output assumptions
 
-A close OSM communications-site match can automatically improve confidence in the existing APRS/seed coordinate. Viewshed does not automatically move a station to an OSM feature.
+Open **Advanced** for Area/Station radio assumptions. TX power can be entered in **Watts or dBm**; Watts are converted to dBm internally before link-budget math.
 
-## 4. Run propagation
+Open **Output** for presentation controls:
 
-Return to **Area** and click **Run area propagation**.
+- granular network heatmap band size (default 3 dB)
+- maximum displayed margin
+- per-station display floor
+- overlay/inverse opacity
 
-The job log shows acquisition, terrain preparation, propagation, merge, and export progress. Use **Cancel Run** to stop a job. Cached DEM tiles are kept for future runs.
+These output controls change presentation, not the underlying ITM path-loss calculation.
 
-## 5. Open the result
+## 5. Run propagation
 
-When a run completes, use:
+Return to **Area** and click **Run area propagation**. The job log shows terrain preparation, propagation, merge, and export progress. Cached DEM tiles are retained for future runs.
 
-- **Open Output Folder**
-- **Open KMZ**
-- **Open GeoTIFF**
+## 6. Open the result
+
+After completion use **Open Output Folder**, **Open KMZ**, or **Open GeoTIFF**.
+
+The KMZ contains:
+
+- **Granular Network Margin** — visible by default; best remaining modeled link margin from any included station, displayed in configurable dB bands.
+- **Inverse Coverage — APRS Not Expected** — off by default; cells inside the requested analysis region where no included station has positive modeled margin.
+- **Per-station viewsheds** — individual digipeater/iGate overlays for inspection.
+
+The legend matches the configured network banding. **0 dB remaining margin is the modeled operational edge.**
 
 Job files are stored under:
 
@@ -52,28 +58,27 @@ Job files are stored under:
 ViewshedData/jobs/<timestamp>/output/
 ```
 
-## Default radio profile
+## Station mode
 
-Area and Station modes currently default to a practical reference profile including:
+After an Area station search, the Station tab shows only that search's station set. Use **Load full cached catalog** when you intentionally want the cumulative station cache. Station mode produces the same network-margin/inverse products, with one station contributing.
+
+## Default reference profile
+
+Area and Station modes use a practical reference profile including:
 
 - 144.390 MHz
-- 47 dBm transmitter power (50 W)
+- 50 W TX power (approximately 47 dBm)
 - 0 dBd TX antenna gain
-- -119 dBm receiver sensitivity
+- -119 dBm RX sensitivity
 - +2 dBd RX antenna gain
-- 148 dB operational path-loss cap
+- 138 dB operational path-loss cap
 - 20 m digipeater antenna height AGL
 - 3 m iGate antenna height AGL
 - 2 m observer/receiver height
+- 1080 radials per station
 
 These are assumptions, not measured parameters for each APRS site.
 
-## Advanced settings
-
-Open **Advanced** to change the reference assumptions used by Area and Station jobs. Settings are persisted to `ViewshedData/advanced_settings.json` and can be reset to Viewshed defaults.
-
-Changing advanced parameters can materially change predicted coverage. Use the defaults unless you understand the parameter being changed.
-
 ## Important limitation
 
-Viewshed predicts terrain-dependent VHF coverage. It does not know the actual ERP, antenna pattern, feedline loss, clutter, foliage, buildings, local noise, weather, receiver installation, or maintenance state of every site. Treat output as an analysis/planning product, not a communications guarantee.
+Signal Peak predicts terrain-dependent VHF coverage. It does not know every site's actual ERP, antenna pattern, feedline loss, clutter, foliage, local noise, weather, receiver installation, or maintenance state. Treat output as an analysis/planning product, not a communications guarantee.
