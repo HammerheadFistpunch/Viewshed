@@ -103,37 +103,77 @@ def install_rendering_fix(engine) -> None:
     def create_clear_legend(work_dir: Path, cfg: dict) -> Path:
         from PIL import Image, ImageDraw
 
+        band_db = max(0.5, float(cfg.get("network_heatmap_band_db", 3.0)))
+        max_db = max(band_db, float(cfg.get("max_margin_db", 30.0)))
         floor_db = float(cfg.get("margin_display_floor_db", 0.0))
-        max_db = float(cfg.get("max_margin_db", 30.0))
-        w, h = 270, 142
-        img = Image.new("RGBA", (w, h), (20, 20, 20, 210))
-        draw = ImageDraw.Draw(img)
-        draw.text((10, 8), "Viewshed Per-Station Legend", fill=(255, 255, 255, 255))
-        draw.line([(10, 26), (w - 10, 26)], fill=(80, 80, 80, 255), width=1)
 
-        draw.text((10, 34), "Predicted remaining link margin:", fill=(200, 200, 200, 255))
-        y = 54
-        for i, x in enumerate(range(10, 26)):
-            t = i / 15.0
-            draw.line(
-                [(x, y + 2), (x, y + 14)],
-                fill=(int(40 - 40 * t), int(120 + 135 * t), int(40 - 40 * t), 220),
-            )
-        draw.text((34, y), f"Digi  {floor_db:+.0f} to +{max_db:.0f} dB", fill=(140, 240, 140, 255))
-        y += 20
-        for i, x in enumerate(range(10, 26)):
-            t = i / 15.0
-            draw.line(
-                [(x, y + 2), (x, y + 14)],
-                fill=(int(80 - 80 * t), int(160 - 130 * t), int(200 + 55 * t), 220),
-            )
-        draw.text((34, y), f"iGate {floor_db:+.0f} to +{max_db:.0f} dB", fill=(140, 200, 240, 255))
-        y += 24
-        draw.line([(10, y), (w - 10, y)], fill=(60, 60, 60, 255), width=1)
-        y += 7
-        draw.text((10, y), "0 dB = modeled operational edge", fill=(180, 180, 180, 255))
-        y += 15
-        draw.text((10, y), "Prediction, not guaranteed communication", fill=(160, 160, 160, 255))
+        def network_rgb(value_db: float) -> tuple[int, int, int]:
+            banded = int(value_db // band_db) * band_db
+            norm = max(0.0, min(1.0, banded / max_db))
+            if norm < 0.25:
+                t = norm / 0.25
+                return 20, int(80 + 175 * t), 255
+            if norm < 0.50:
+                t = (norm - 0.25) / 0.25
+                return 20, 255, int(255 * (1.0 - t))
+            if norm < 0.75:
+                t = (norm - 0.50) / 0.25
+                return int(255 * t), 255, 0
+            t = (norm - 0.75) / 0.25
+            return 255, int(255 * (1.0 - t)), 0
+
+        w, h = 330, 190
+        img = Image.new("RGBA", (w, h), (20, 20, 20, 220))
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 8), "Signal Peak Link-Margin Legend", fill=(255, 255, 255, 255))
+        draw.line([(10, 27), (w - 10, 27)], fill=(80, 80, 80, 255), width=1)
+
+        draw.text(
+            (10, 35),
+            f"Network best margin — {band_db:g} dB bands",
+            fill=(220, 220, 220, 255),
+        )
+
+        x0, x1 = 10, w - 10
+        y0, y1 = 55, 75
+        n_bands = max(1, int((max_db + band_db - 1e-9) // band_db))
+        for i in range(n_bands + 1):
+            lo = min(max_db, i * band_db)
+            left = int(round(x0 + (x1 - x0) * (lo / max_db)))
+            hi = min(max_db, (i + 1) * band_db)
+            right = int(round(x0 + (x1 - x0) * (hi / max_db)))
+            if right <= left:
+                right = left + 1
+            rgb = network_rgb(lo)
+            draw.rectangle((left, y0, min(x1, right), y1), fill=(*rgb, 235))
+
+        draw.rectangle((x0, y0, x1, y1), outline=(230, 230, 230, 255), width=1)
+        draw.text((x0, 79), "0 dB", fill=(210, 210, 210, 255))
+        max_label = f"+{max_db:g} dB"
+        draw.text((x1 - 48, 79), max_label, fill=(210, 210, 210, 255))
+        draw.text((10, 96), "0 dB = modeled operational edge", fill=(185, 185, 185, 255))
+
+        y = 116
+        draw.rectangle((10, y, 27, y + 12), fill=(220, 35, 35, 210))
+        draw.text((34, y - 1), "Inverse: APRS not expected", fill=(220, 205, 205, 255))
+
+        y += 21
+        draw.rectangle((10, y, 27, y + 12), fill=(20, 210, 40, 220))
+        draw.text(
+            (34, y - 1),
+            f"Per-station Digi  {floor_db:+.0f} to +{max_db:g} dB",
+            fill=(150, 235, 155, 255),
+        )
+
+        y += 21
+        draw.rectangle((10, y, 27, y + 12), fill=(45, 95, 230, 220))
+        draw.text(
+            (34, y - 1),
+            f"Per-station iGate {floor_db:+.0f} to +{max_db:g} dB",
+            fill=(155, 195, 245, 255),
+        )
+
+        draw.text((10, 174), "Prediction, not guaranteed communication", fill=(160, 160, 160, 255))
 
         legend_path = work_dir / "legend.png"
         img.save(str(legend_path))
@@ -176,7 +216,7 @@ def install_rendering_fix(engine) -> None:
                 (Path(kwargs.get("work_dir") or args[4]) / "coverage_overlay.png").unlink(missing_ok=True)
             except Exception:
                 pass
-            print("   Composite coverage view removed; KMZ contains per-station viewsheds only.")
+            print("   Legacy composite count view removed; per-station viewsheds retained for network products.")
         except Exception as exc:
             print(f"   Warning: could not remove composite KMZ view: {exc}")
         return kmz_path
