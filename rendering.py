@@ -174,3 +174,9 @@ def install_rendering_fix(engine) -> None:
     from conus_support import install_conus_support
 
     install_conus_support(engine)
+
+    # Add network-level products without changing the established ITM worker:
+    # a stepped best-margin heatmap and an inverse/dead-zone overlay.
+    from coverage_products import install_coverage_products
+
+    install_coverage_products(engine)
