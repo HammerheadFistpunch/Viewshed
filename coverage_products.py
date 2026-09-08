@@ -259,32 +259,36 @@ def _build_network_products(results: list, dem_path: Path, work_dir: Path, cfg: 
 
     _render_margin_bands(best_path, heat_png, cfg)
     _render_inverse(inverse_path, inverse_png, cfg)
-    print("   Network products: 3 dB margin bands + inverse APRS dead-zone raster ready")
+    band_db = max(0.5, float(cfg.get("network_heatmap_band_db", 3.0)))
+    print(f"   Network products: {band_db:g} dB margin bands + inverse APRS dead-zone raster ready")
 
 
-def _inject_network_layers(kmz_path: Path, work_dir: Path) -> None:
+def _inject_network_layers(kmz_path: Path, work_dir: Path, cfg: dict | None = None) -> None:
     heat_png = work_dir / "network_margin_bands.png"
     inverse_png = work_dir / "inverse_coverage.png"
     best_path = work_dir / "network_best_margin.tif"
     if not (heat_png.exists() and inverse_png.exists() and best_path.exists()):
         return
 
+    cfg = cfg or {}
+    band_db = max(0.5, float(cfg.get("network_heatmap_band_db", 3.0)))
     west, south, east, north = _network_bbox(best_path)
     folder = f"""
   <Folder>
     <name>Network Analysis</name>
-    <open>0</open>
+    <visibility>1</visibility>
+    <open>1</open>
     <GroundOverlay>
-      <name>Granular Network Margin (3 dB bands)</name>
-      <visibility>0</visibility>
-      <drawOrder>2</drawOrder>
+      <name>Granular Network Margin ({band_db:g} dB bands)</name>
+      <visibility>1</visibility>
+      <drawOrder>10</drawOrder>
       <Icon><href>network/network_margin_bands.png</href></Icon>
       <LatLonBox><north>{north}</north><south>{south}</south><east>{east}</east><west>{west}</west></LatLonBox>
     </GroundOverlay>
     <GroundOverlay>
       <name>Inverse Coverage — APRS Not Expected</name>
       <visibility>0</visibility>
-      <drawOrder>3</drawOrder>
+      <drawOrder>11</drawOrder>
       <Icon><href>network/inverse_coverage.png</href></Icon>
       <LatLonBox><north>{north}</north><south>{south}</south><east>{east}</east><west>{west}</west></LatLonBox>
     </GroundOverlay>
@@ -326,8 +330,9 @@ def install_coverage_products(engine) -> None:
         kmz_path = Path(original_build(*args, **kwargs))
         try:
             work_dir = Path(kwargs.get("work_dir") or args[4])
-            _inject_network_layers(kmz_path, work_dir)
-            print("   KMZ: added toggleable granular margin and inverse-coverage layers")
+            cfg = kwargs.get("cfg") or (args[3] if len(args) > 3 else engine.CONFIG)
+            _inject_network_layers(kmz_path, work_dir, cfg)
+            print("   KMZ: granular network margin visible by default; inverse layer available as a toggle")
         except Exception as exc:
             print(f"   Warning: network KMZ layers could not be added: {exc}")
         return kmz_path
