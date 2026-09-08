@@ -10,8 +10,8 @@ from pathlib import Path
 
 def _configure_console_encoding() -> None:
     """Keep diagnostic Unicode from crashing Windows worker processes."""
-    # Spawned ProcessPool workers inherit these settings. Explicitly include
-    # an error policy so a decorative symbol can never abort RF computation.
+    # Configure the parent process too. Spawned workers get an explicit child-
+    # local setup through safe_worker.py below.
     os.environ["PYTHONIOENCODING"] = "utf-8:replace"
     os.environ["PYTHONUTF8"] = "1"
     for stream in (sys.stdout, sys.stderr):
@@ -190,6 +190,12 @@ def install_rendering_fix(engine) -> None:
     from conus_support import install_conus_support
 
     install_conus_support(engine)
+
+    # Windows ProcessPool uses spawn. Configure encoding inside each spawned
+    # child before the legacy station worker can emit diagnostic Unicode.
+    from safe_worker import install_safe_worker
+
+    install_safe_worker(engine)
 
     # The legacy loader also had a Utah bounding-box gate. Replace that before
     # viewshed_core asks the engine to validate the selected stations.
