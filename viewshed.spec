@@ -26,6 +26,7 @@ datas = [
     ("docs/TROUBLESHOOTING.md", "docs"),
     ("docs/LICENSES_AND_DEPENDENCIES.md", "docs"),
     ("docs/RELEASE_READINESS_1.0.0.md", "docs"),
+    ("docs/RELEASE_NOTES_1.1.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
@@ -40,8 +41,14 @@ a = Analysis(
         "map_workspace",
         "map_workspace_patch",
         "advanced_workspace",
+        "feature_ui_workspace",
+        "power_ui_cleanup_workspace",
         "repeat_run_workspace",
         "help_workspace",
+        "conus_support",
+        "conus_station_loader",
+        "coverage_products",
+        "safe_worker",
         "osm_crossref",
         "seed_builder",
     ],
