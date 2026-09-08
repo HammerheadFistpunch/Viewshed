@@ -13,7 +13,7 @@ from viewshed_core import portable_data_root, resource_path
 
 
 PRODUCT_NAME = "Signal Peak"
-PRODUCT_VERSION = "1.0.2"
+PRODUCT_VERSION = "1.1.0"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 
 viewshed_core.APP_VERSION = PRODUCT_VERSION
@@ -29,6 +29,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         ("GNU GPL v2 License", "LICENSE"),
         ("Quick Start", "docs/QUICK_START.md"),
         ("User Guide", "docs/USER_GUIDE.md"),
+        ("1.1.0 Release Notes", "docs/RELEASE_NOTES_1.1.0.md"),
         ("Propagation Model", "docs/PROPAGATION_MODEL.md"),
         ("CONUS support", "docs/CONUS.md"),
         ("Station Data", "docs/STATION_DATA.md"),

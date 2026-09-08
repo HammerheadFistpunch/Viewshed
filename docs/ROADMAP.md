@@ -1,126 +1,99 @@
-# Viewshed Roadmap
+# Signal Peak Roadmap
 
-This roadmap reflects the current state after the map-first UI, APRS/OSM location-confidence workflow, large-DEM memory guard, output/cancellation sprint, Advanced settings, and offline documentation/help work.
+This roadmap reflects the state of Signal Peak 1.1.0. The guiding principle remains: UI and output improvements must not silently change the established terrain/ITM/link-margin foundation.
 
-The guiding principle remains: UI/workflow changes must not silently change the propagation foundation. Area, Station, and Custom feed the same terrain/ITM/link-margin engine, with differences limited to explicit site/radio inputs.
+## Completed through 1.1.0
 
-## Completed product milestones
+### Regional operation
+
+- [x] Remove the hard-coded Utah station validation box.
+- [x] Select a local UTM CRS from each job's geography.
+- [x] Use broad CONUS elevation sanity checks.
+- [x] Derive USGS 3DEP terrain requests from the actual job region.
 
 ### Job workflow
 
-- [x] Cancel a running propagation job from the UI.
-- [x] Report cancelled jobs separately from failed jobs.
+- [x] Cancel running jobs from the UI.
 - [x] Preserve shared DEM cache on cancellation.
-- [x] Provide Open Output Folder, Open KMZ, and Open GeoTIFF actions after completion.
-
-### Coverage/output presentation
-
-- [x] Rename the combined visual product around **Coverage Overlap** instead of treating it as a generic heatmap.
-- [x] Document that clean circular edges can be the configured maximum calculation range rather than a physical RF boundary.
-- [x] Lower the Area/Station reference operational path-loss cap to 148 dB after field-review of overly optimistic range behavior.
-- [ ] Add explicit range-clipped metadata/legend treatment when useful margin remains at the calculation boundary.
-- [ ] Continue improving categorical per-station Strong/Good/Marginal presentation while retaining raw link-margin rasters.
+- [x] Reuse the application for repeated jobs without restarting.
+- [x] Keep Station mode scoped to the latest Area station search, with an explicit full-cache option.
 
 ### Station corrections and confidence
 
-- [x] Separate coordinate confidence from position freshness.
-- [x] Default Corrections to a Needs Review queue sorted by confidence.
-- [x] Add Next and auto-advance after save/approval.
-- [x] Keep the full catalog visible when the review queue is exhausted.
+- [x] Separate coordinate confidence from freshness.
+- [x] Provide Needs Review / Show All correction queues.
 - [x] Add Standard/Topo basemap switching.
-- [x] Add OpenStreetMap/Overpass communications-site cross-reference.
-- [x] Use strong OSM/APRS geographic agreement as automatic corroboration of the existing coordinate.
-- [x] Keep human approval mandatory before moving a model coordinate to an OSM location.
-- [ ] Add DEM-derived elevation and hillshade assistance.
-- [ ] Add terrain plausibility warnings without automatic relocation.
+- [x] Add OpenStreetMap communications-site cross-reference.
+- [x] Require human approval before moving a model coordinate.
 
-### Advanced assumptions
+### Propagation assumptions
 
-- [x] Add a persistent Advanced tab for Area/Station radio and propagation assumptions.
-- [x] Expose path-loss cap, TX/RX assumptions, antenna heights, frequency, radial count, display limits, worker DEM size, and key ITM parameters.
-- [x] Add numeric validation and Reset to Viewshed defaults.
-- [ ] Add named/preset reference profiles if real-world validation shows they are useful.
+- [x] Use the 138 dB reference operational path-loss cap.
+- [x] Use 1080 reference radials with reduced lateral gap fill.
+- [x] Provide persistent Advanced Area/Station assumptions.
+- [x] Allow Area/Station TX power entry in Watts or dBm while keeping dBm internally.
 
-### Documentation and Help
+### Network output presentation
 
-- [x] Refresh `README.md` as the project entry point.
-- [x] Add `docs/QUICK_START.md`.
-- [x] Add `docs/USER_GUIDE.md`.
-- [x] Add `docs/PROPAGATION_MODEL.md`.
-- [x] Add `docs/STATION_DATA.md`.
-- [x] Add `docs/LOCATION_CORRECTIONS.md`.
-- [x] Add `docs/OUTPUTS.md`.
-- [x] Add `docs/TROUBLESHOOTING.md`.
-- [x] Add `docs/LICENSES_AND_DEPENDENCIES.md`.
-- [x] Add `docs/SPECIAL_CONSIDERATIONS.md`.
-- [x] Add an offline Help/About tab and bundle the documentation in the Windows executable.
-- [ ] Add an exact pinned dependency/license manifest as part of a formal release process.
-- [ ] Add a clear top-level project license before formal distribution.
+- [x] Retain individual per-station link-margin viewsheds.
+- [x] Add a network best-margin surface.
+- [x] Add configurable stepped dB heatmap bands.
+- [x] Add a binary inverse/dead-zone layer.
+- [x] Add Output-tab controls for band size, display maximum, display floor, and opacity.
+- [x] Make the network margin heatmap visible by default in KMZ output.
+- [x] Match the KMZ legend to the configured network banding.
 
-## Next recommended sprint
+### Windows robustness
 
-### 1. DEM-assisted correction review
+- [x] Package and smoke-test a portable Windows executable.
+- [x] Protect spawned worker logging from Windows legacy `charmap` Unicode failures.
 
-Reuse the USGS 3DEP data already downloaded by Viewshed to add:
+### Documentation
 
-- elevation at reported coordinate;
-- elevation at proposed/model coordinate;
-- optional hillshade/local terrain display;
-- elevation delta/local terrain context.
+- [x] Maintain bundled Quick Start, User Guide, Propagation Model, Station Data, Location Corrections, Outputs, Troubleshooting, dependency/license notes, Special Considerations, and CONUS documentation.
+- [x] Add 1.1.0 release notes.
+- [x] Provide offline Help/About access to bundled documentation.
 
-The first version should be read-only/advisory. It must not automatically relocate a station.
+## Next recommended work
 
-### 2. Terrain-based location plausibility
+### 1. Real-world validation
 
-Once elevation readout is stable, add conservative warnings such as:
+Collect controlled comparisons between modeled margin and observed APRS/mobile reception. Use those results to evaluate the 138 dB reference cap, antenna assumptions, and whether named field profiles are justified.
 
-- reported point is unusually low relative to nearby terrain;
-- much higher terrain exists nearby;
-- coordinate is inconsistent with an infrastructure site expected to be on a ridge/peak.
+### 2. Preserve below-threshold margin explicitly
 
-These checks should only change review priority/confidence when evidence is strong and explainable.
+The current operational per-station raster intentionally collapses below-threshold cells to nodata. A future diagnostic raster could preserve negative modeled margin with a distinct nodata sentinel. That would make it possible to map *how far below threshold* a dead zone is, rather than only where positive operational coverage is absent.
 
-### 3. Range-clipping diagnostics
+This should be added as a separate diagnostic product so it cannot be confused with the current operational coverage surface.
 
-The propagation engine currently stops at the selected station maximum calculation range. Add diagnostics that detect when one or more radials still have positive operational margin at the outer boundary, then:
+### 3. DEM-assisted correction review
 
-- mark the station/result as range-clipped;
-- expose that fact in the job log;
-- distinguish calculation-ended-here from modeled-no-coverage in output metadata/legend.
+Add read-only terrain context to Corrections:
 
-### 4. Geographic generalization
+- elevation at reported/model/proposed coordinates
+- local elevation delta
+- optional hillshade
+- conservative terrain-plausibility warnings
 
-Remove remaining Utah prototype assumptions, especially:
+Terrain context should never automatically relocate a station.
 
-- hardcoded station validation bounds;
-- fixed UTM 12N behavior;
-- Utah-oriented legacy naming.
+### 4. Large-region projection strategy
 
-Do not claim national/generalized propagation support until this is complete and tested.
+Signal Peak currently uses one local UTM CRS per job. Regional jobs are the target use case. If nationwide or very broad multi-zone jobs become important, evaluate a projection/mosaicking strategy designed for that scale.
 
-### 5. Validation and regression tests
+### 5. Output/GIS refinement
 
-Strengthen automated and manual tests around:
+Consider:
 
-- station acquisition/provenance merges;
-- OSM corroboration thresholds;
-- reviewed correction persistence;
-- Advanced settings propagation into jobs;
-- large-area DEM behavior;
-- cancellation;
-- range clipping;
-- documentation packaging;
-- KMZ/GeoTIFF output semantics.
+- explicit metadata when useful margin reaches the configured calculation boundary
+- cleaner export of network best-margin and inverse GeoTIFFs into the primary output folder
+- machine-readable run metadata summarizing radio, heatmap, projection, and terrain settings
 
-## Special considerations that remain part of the product contract
+### 6. Release engineering
 
-- APRS positions may be stale, incomplete, or incorrect.
-- Missing timestamps describe freshness, not coordinate accuracy.
-- Station ERP, antenna height, pattern, and feedline losses are generally not available from APRS.
-- Area and Station modes therefore use explicit reference assumptions, currently including a 148 dB operational path-loss cap.
-- OSM communications infrastructure is corroborating evidence, not proof of station identity.
-- Coverage is a terrain/propagation prediction, not a communications guarantee.
-- Weather, vegetation, buildings, local clutter, receiver quality/noise, feedline loss, polarization mismatch, and other real-world factors are not fully modeled.
-- APRS-IS is a live packet stream, not a complete station directory.
-- Extremely large analyses may use reduced terrain resolution to keep memory bounded.
-- The legacy propagation backend still contains Utah-oriented assumptions.
+Continue improving:
+
+- dependency pinning and audit records
+- source/binary release pairing required by GPLv2
+- checksums for published Windows artifacts
+- automated tests for non-Utah station validation, UTM selection, heatmap band generation, and KMZ layer visibility

@@ -1,4 +1,4 @@
-# Viewshed Outputs
+# Signal Peak Outputs
 
 ## Output location
 
@@ -16,36 +16,62 @@ ViewshedData/jobs/<timestamp>/output/
 
 The UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF** after a successful run.
 
-## KMZ
+## KMZ layers
 
-The KMZ is intended for visual inspection in Google Earth or another compatible viewer. It contains station placemarks and **per-station** modeled coverage overlays.
+Signal Peak 1.1.0 exports three complementary views of the modeled result.
 
-The composite/combined coverage view has been removed from the KMZ. Overlap counts can be useful for GIS processing, but they do not communicate the modeled link margin of any particular station and were too easy to misread as a propagation result.
+### Granular Network Margin
 
-Toggle individual station folders to compare predicted footprints and terrain shadows directly.
+This is the default visible network layer. Signal Peak reprojects the successfully modeled per-station rasters onto the job analysis grid and keeps the **best remaining link margin** at each cell.
 
-## GeoTIFF
+The color scale is stepped in configurable dB bands. The default is **3 dB per band**, using a blue → cyan → green → yellow → orange → red progression from the modeled operational edge toward stronger remaining margin. The legend is generated from the same configured band size and maximum displayed margin.
 
-`coverage_count.tif` may still be written as an internal/analysis merge raster for compatibility and GIS processing. It counts how many per-station rasters have positive modeled margin at each grid cell; it is **not** a signal-strength surface.
+This surface is not a count of stations. A cell represents the strongest modeled remaining margin available from any included station.
 
-Per-station rasters under the work directory retain modeled link-margin values and are the more meaningful technical output when evaluating a particular station.
+### Inverse Coverage — APRS Not Expected
+
+The inverse layer marks cells inside the requested analysis region where `coverage_count <= 0`: no included station has positive modeled remaining margin there.
+
+This is a threshold/dead-zone product. It does **not** estimate how many dB below threshold a dead-zone cell is, because the current per-station operational raster does not preserve a reliable negative-margin surface.
+
+The inverse layer is included in the KMZ but is off by default.
+
+### Per-station viewsheds
+
+Individual digipeater and iGate overlays remain in the KMZ for site-by-site inspection. Digipeaters use the green family and iGates use the blue family. These can be toggled independently from the network layers.
+
+## Legend
+
+The KMZ legend is centered on the 1.1.0 network presentation:
+
+- the stepped best-margin color scale and configured dB band size
+- `0 dB` as the modeled operational edge
+- the configured maximum displayed margin
+- an inverse/dead-zone swatch
+- references for the per-station digipeater and iGate overlays
+
+## GeoTIFF products
+
+`coverage_count.tif` counts how many unique per-station rasters have positive modeled margin at each grid cell. It remains useful for GIS processing but is **not** a signal-strength surface.
+
+The work directory also contains:
+
+- `network_best_margin.tif` — best positive/zero remaining margin from the modeled network
+- `inverse_coverage.tif` — binary dead-zone mask used to render the inverse layer
+- per-station `viewshed_*.tif` rasters
 
 ## Per-station link margin
 
-Per-station modeled link margin uses 0 dB as the reference operational edge. Positive margin indicates remaining modeled budget; below-threshold values are not treated as reliable operational coverage.
-
-The displayed coverage therefore represents modeled operational margin for each station rather than a composite count category.
+Per-station modeled link margin uses **0 dB** as the reference operational edge. Positive margin indicates remaining modeled budget; below-threshold values are not treated as reliable operational coverage.
 
 ## Hard circular edges
 
-A clean circular edge centered on a station usually indicates the configured **maximum calculation range**, not a physical propagation boundary.
-
-If modeled margin remains positive at that range, the calculation stops before the model reaches its predicted edge. Increase maximum calculation range if the analysis requires following that lobe farther, while considering runtime and DEM size.
+A clean circular edge centered on a station usually indicates the configured **maximum calculation range**, not a physical propagation boundary. Increase the calculation range if useful modeled margin is still present at the edge and a longer analysis is required.
 
 ## Large-area resolution
 
-For very large geographic jobs, Viewshed may reduce terrain-analysis resolution to remain memory bounded. This can reduce fine terrain detail compared with a small-area run. The job log should be retained with the outputs because it records terrain preparation and analysis settings.
+For very large jobs, Signal Peak may reduce terrain-analysis resolution to remain memory bounded. This can reduce fine terrain detail compared with a smaller regional run. Retain the job log because it records terrain preparation and analysis settings.
 
 ## Interpreting results
 
-Coverage output is a prediction based on terrain and configured radio/model assumptions. It does not include every real-world factor. See `SPECIAL_CONSIDERATIONS.md` and `PROPAGATION_MODEL.md` before using results for operational decisions.
+Coverage is a prediction based on terrain and configured radio/model assumptions. It does not include every real-world factor. See `SPECIAL_CONSIDERATIONS.md` and `PROPAGATION_MODEL.md` before using results for operational decisions.

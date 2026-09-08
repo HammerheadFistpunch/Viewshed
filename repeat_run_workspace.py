@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from workspace_tuning import ViewshedWorkspace as _ViewshedWorkspace
+from power_ui_cleanup_workspace import ViewshedWorkspace as _ViewshedWorkspace
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
