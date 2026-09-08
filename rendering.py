@@ -175,6 +175,12 @@ def install_rendering_fix(engine) -> None:
 
     install_conus_support(engine)
 
+    # The legacy loader also had a Utah bounding-box gate. Replace that before
+    # viewshed_core asks the engine to validate the selected stations.
+    from conus_station_loader import install_conus_station_loader
+
+    install_conus_station_loader(engine)
+
     # Add network-level products without changing the established ITM worker:
     # a stepped best-margin heatmap and an inverse/dead-zone overlay.
     from coverage_products import install_coverage_products
