@@ -37,9 +37,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         ("Outputs", "docs/OUTPUTS.md"),
         ("Troubleshooting", "docs/TROUBLESHOOTING.md"),
         ("Dependencies / Licenses", "docs/LICENSES_AND_DEPENDENCIES.md"),
-        ("1.0 Release Readiness", "docs/RELEASE_READINESS_1.0.0.md"),
         ("Special Considerations", "docs/SPECIAL_CONSIDERATIONS.md"),
-        ("Roadmap", "docs/ROADMAP.md"),
     ]
 
     def __init__(self, master, app) -> None:
