@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from operator_tools_workspace import ViewshedWorkspace as _FeatureWorkspace
+from operator_tools_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _FeatureWorkspace
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 
 
@@ -22,4 +22,7 @@ class ViewshedWorkspace(_FeatureWorkspace):
         _TunedWorkspace._build_custom(self)
 
     def run_custom(self) -> None:
-        _TunedWorkspace.run_custom(self)
+        if getattr(self, "_imperial", False):
+            with self._metric_values(((self.custom_radius, KM_PER_MI), (self.custom_height, M_PER_FT))):
+                return _TunedWorkspace.run_custom(self)
+        return _TunedWorkspace.run_custom(self)
