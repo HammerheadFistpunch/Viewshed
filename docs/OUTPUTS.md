@@ -18,7 +18,7 @@ The UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF** after
 
 ## KMZ layers
 
-Signal Peak 1.1.0 exports three complementary views of the modeled result.
+Signal Peak 1.2.0 retains the network output products introduced in 1.1.0 while allowing each station to use its own RF assumptions when configured.
 
 ### Granular Network Margin
 
@@ -30,19 +30,21 @@ This surface is not a count of stations. A cell represents the strongest modeled
 
 ### Inverse Coverage — APRS Not Expected
 
-The inverse layer marks cells inside the requested analysis region where `coverage_count <= 0`: no included station has positive modeled remaining margin there.
+The inverse layer marks cells inside the requested analysis region where no included station has positive modeled remaining margin.
 
-This is a threshold/dead-zone product. It does **not** estimate how many dB below threshold a dead-zone cell is, because the current per-station operational raster does not preserve a reliable negative-margin surface.
+This is a threshold/dead-zone product. It does **not** estimate how many dB below threshold a dead-zone cell is because the current per-station operational raster does not preserve a reliable negative-margin surface.
 
 The inverse layer is included in the KMZ but is off by default.
 
 ### Per-station viewsheds
 
-Individual digipeater and iGate overlays remain in the KMZ for site-by-site inspection. Digipeaters use the green family and iGates use the blue family. These can be toggled independently from the network layers.
+Individual digipeater and iGate overlays remain in the KMZ for site-by-site inspection and can be toggled independently from the network layers.
+
+In 1.2.0, those per-station rasters may be based on station-specific height, TX power, gain, frequency, or path-loss cap rather than one shared global assumption set.
 
 ## Legend
 
-The KMZ legend is centered on the 1.1.0 network presentation:
+The KMZ legend shows:
 
 - the stepped best-margin color scale and configured dB band size
 - `0 dB` as the modeled operational edge
@@ -68,10 +70,12 @@ Per-station modeled link margin uses **0 dB** as the reference operational edge.
 
 A clean circular edge centered on a station usually indicates the configured **maximum calculation range**, not a physical propagation boundary. Increase the calculation range if useful modeled margin is still present at the edge and a longer analysis is required.
 
-## Large-area resolution
+## Units
 
-For very large jobs, Signal Peak may reduce terrain-analysis resolution to remain memory bounded. This can reduce fine terrain detail compared with a smaller regional run. Retain the job log because it records terrain preparation and analysis settings.
+The Metric/Imperial setting does not change output physics or raster coordinate math. It changes operator-facing distance/height input and display only; jobs are converted to metric before propagation.
 
 ## Interpreting results
 
-Coverage is a prediction based on terrain and configured radio/model assumptions. It does not include every real-world factor. See `SPECIAL_CONSIDERATIONS.md` and `PROPAGATION_MODEL.md` before using results for operational decisions.
+Coverage is a prediction based on terrain and configured radio/model assumptions. Review the Station Data RF-source column and Advanced settings when comparing results, especially when some stations use curated overrides and others use global fallbacks.
+
+See `SPECIAL_CONSIDERATIONS.md` and `PROPAGATION_MODEL.md` before using results for operational decisions.
