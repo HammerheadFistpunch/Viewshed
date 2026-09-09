@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from operator_tools_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _FeatureWorkspace
+from station_data_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _FeatureWorkspace
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 
 
