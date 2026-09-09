@@ -46,25 +46,26 @@ class ViewshedWorkspace(_ViewshedWorkspace):
     def __init__(self, master, app) -> None:
         self._resource_prefs = _load_resource_prefs()
         super().__init__(master, app)
-        self._install_resource_controls()
+        self._build_resource_tab()
         self._install_resource_planning_guard()
 
-    def _advanced_tab(self):
-        for tab_id in self.notebook.tabs():
-            try:
-                if self.notebook.tab(tab_id, "text") == "Advanced":
-                    return self.nametowidget(tab_id)
-            except Exception:
-                continue
-        return None
+    def _build_resource_tab(self) -> None:
+        """Keep V2 resource controls separate so they do not enlarge Advanced."""
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="Resources")
 
-    def _install_resource_controls(self) -> None:
-        tab = self._advanced_tab()
-        if tab is None:
-            return
+        ttk.Label(tab, text="Terrain detail / resource planning", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            tab,
+            text=(
+                "Signal Peak converts the selected terrain-detail level into safe DEM sizes and a parallel-worker count "
+                "for each run. Memory safety always takes priority over speed."
+            ),
+            wraplength=900,
+        ).pack(anchor="w", pady=(3, 10))
 
-        box = ttk.LabelFrame(tab, text="Terrain detail / resource planning", padding=10)
-        box.pack(fill="x", pady=(10, 0))
+        box = ttk.LabelFrame(tab, text="Run planning", padding=10)
+        box.pack(fill="x")
         box.columnconfigure(1, weight=1)
 
         saved_mode = str(self._resource_prefs.get("terrain_detail_mode", "Auto")).title()
@@ -193,9 +194,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
                 raw["radio_settings"] = radio
                 job_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
-                # viewshed_core currently calls prepare_analysis_dem(..., 8000).
-                # The V2 analysis layer reads this inherited value and safely
-                # substitutes the planner's per-run analysis dimension.
                 os.environ["SIGNAL_PEAK_ANALYSIS_MAX_PX"] = str(plan.analysis_max_px)
 
                 summary = format_plan(plan)
