@@ -45,16 +45,32 @@ def _is_valid_value(src, value: float) -> bool:
     return True
 
 
-def _sample_with_nearby_fallback(src, lon: float, lat: float, radius_px: int = NEARBY_VALID_RADIUS_PX) -> float | None:
-    """Sample one terrain point, falling back to the nearest valid DEM pixel.
+def _dataset_xy(src, lon: float, lat: float) -> tuple[float, float]:
+    """Transform WGS84 lon/lat into the raster's native CRS."""
+    from rasterio.crs import CRS
+    from rasterio.warp import transform
 
-    3DEP tiles can contain isolated nodata pixels and seam-edge artifacts. HAAT
-    should not fail because one nominal sample lands on such a pixel. The
-    fallback is deliberately local (a few 1-arcsecond pixels) so it does not
-    materially move the terrain sample.
-    """
+    if not src.crs:
+        # 3DEP geographic tiles should always declare a CRS, but preserve the
+        # historical behavior for an otherwise usable legacy raster.
+        return lon, lat
+
+    wgs84 = CRS.from_epsg(4326)
+    if src.crs == wgs84:
+        return lon, lat
+
+    xs, ys = transform(wgs84, src.crs, [lon], [lat])
+    return float(xs[0]), float(ys[0])
+
+
+def _sample_with_nearby_fallback(src, lon: float, lat: float, radius_px: int = NEARBY_VALID_RADIUS_PX) -> float | None:
+    """Sample one WGS84 terrain point, falling back to the nearest valid DEM pixel."""
     try:
-        row, col = src.index(lon, lat)
+        x, y = _dataset_xy(src, lon, lat)
+        left, bottom, right, top = src.bounds
+        if not (left <= x <= right and bottom <= y <= top):
+            return None
+        row, col = src.index(x, y)
     except Exception:
         return None
     if row < 0 or col < 0 or row >= src.height or col >= src.width:
@@ -129,9 +145,11 @@ def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) 
 
         site_elev = sample((lat, lon))
         if site_elev is None:
+            site_key = _tile_for(lat, lon)
+            src = datasets[site_key]
             raise RuntimeError(
-                f"No valid 3DEP terrain was found at or immediately around the site "
-                f"({lat:.5f}, {lon:.5f})."
+                f"No valid 3DEP terrain was found at the site ({lat:.5f}, {lon:.5f}). "
+                f"Tile={Path(src.name).name}, CRS={src.crs}, bounds={tuple(round(v, 5) for v in src.bounds)}."
             )
 
         radial_means: list[float] = []
@@ -158,5 +176,5 @@ def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) 
         "required_antenna_agl_m": required_agl,
         "radial_means_m": radial_means,
         "radial_valid_samples": radial_valid_counts,
-        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site; isolated 3DEP nodata tolerated",
+        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site; raster CRS respected; isolated 3DEP nodata tolerated",
     }
