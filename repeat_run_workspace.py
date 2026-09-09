@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resource_ui_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from area_scope_workspace import ViewshedWorkspace as _ViewshedWorkspace
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
