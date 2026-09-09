@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from feature_ui_workspace import ViewshedWorkspace as _FeatureWorkspace
+from operator_tools_workspace import ViewshedWorkspace as _FeatureWorkspace
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 
 
