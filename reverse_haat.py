@@ -32,9 +32,12 @@ def _destination(lat: float, lon: float, bearing_deg: float, distance_km: float)
 def _tile_for(lat: float, lon: float) -> tuple[int, int]:
     if lon >= 0:
         raise ValueError("Reverse HAAT currently uses the CONUS/western-hemisphere 3DEP tile adapter.")
-    # dem_sources expects the north edge of the one-degree cell. For example,
-    # 40.76 N / 111.89 W belongs to n40w112, represented here as (41, 112).
-    return math.ceil(lat), math.ceil(abs(lon))
+    # dem_sources._download_tile() converts its latitude argument N to a file
+    # named n(N-1). The current USGS files named nXX span approximately
+    # (XX-1)..XX degrees north (for example n38 spans ~37..38 N). Therefore a
+    # point at 38.07 N needs n39, which requires passing 40 to _download_tile.
+    # The extra +1 below corrects that adapter convention for point sampling.
+    return math.ceil(lat) + 1, math.ceil(abs(lon))
 
 
 def _is_valid_value(src, value: float) -> bool:
@@ -51,8 +54,6 @@ def _dataset_xy(src, lon: float, lat: float) -> tuple[float, float]:
     from rasterio.warp import transform
 
     if not src.crs:
-        # 3DEP geographic tiles should always declare a CRS, but preserve the
-        # historical behavior for an otherwise usable legacy raster.
         return lon, lat
 
     wgs84 = CRS.from_epsg(4326)
@@ -176,5 +177,5 @@ def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) 
         "required_antenna_agl_m": required_agl,
         "radial_means_m": radial_means,
         "radial_valid_samples": radial_valid_counts,
-        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site; raster CRS respected; isolated 3DEP nodata tolerated",
+        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site; corrected 3DEP tile indexing; raster CRS respected; isolated 3DEP nodata tolerated",
     }
