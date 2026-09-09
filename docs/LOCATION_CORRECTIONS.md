@@ -1,79 +1,52 @@
-# Station Location Confidence and Corrections
+# Signal Peak Location Corrections
 
-## Principles
+Signal Peak keeps station-location correction separate from station RF assumptions. A reviewed coordinate answers **where should this station be modeled?**; a Station Data override answers **what radio assumptions should this station use?**. The two registries are independent.
 
-Viewshed keeps reported station data separate from modeled corrections.
+## Coordinate concepts
 
-- Raw/reported coordinates are preserved.
-- Reviewed corrections can change the coordinate used by propagation.
-- Candidates do not change propagation until approved.
-- Callsigns/names are never used to infer a new coordinate by themselves.
-- OpenStreetMap and terrain are corroborating evidence, not automatic relocation authority.
+Signal Peak preserves three coordinate concepts:
 
-## Location confidence
+- **Reported coordinate** — the position received from APRS, cache, seed, or another acquisition source.
+- **Model coordinate** — the coordinate currently used by the propagation engine.
+- **Proposed/reviewed coordinate** — a candidate or human-approved replacement.
 
-Location confidence represents trust in the coordinate provenance. It is intentionally separate from observation freshness.
+A reviewed correction changes the model coordinate while preserving the reported coordinate and provenance.
 
-Typical source baselines are:
+## Confidence and freshness
 
-- reviewed override: HIGH / 100
-- APRS-IS coordinate: HIGH
-- aprs.fi coordinate: HIGH
-- cache: MEDIUM
-- seed: MEDIUM
-- unknown provenance: MEDIUM unless other concerns apply
+Location confidence and timestamp freshness are tracked separately. A missing or old timestamp does not automatically mean a coordinate is geographically wrong.
 
-An explicit unreviewed correction candidate remains in the review queue until resolved.
+The correction queue prioritizes records with stronger reasons for review, such as weak provenance, explicit correction candidates, or disagreement with independent geographic evidence.
 
-## Freshness
+## OpenStreetMap cross-reference
 
-Freshness indicates whether Viewshed knows when the station position was observed. Labels include recent, aging, stale, very stale, and unknown.
+Signal Peak can compare station coordinates with nearby OSM communications towers/masts. A close match can corroborate an existing coordinate, but OSM is evidence rather than authority:
 
-A missing timestamp does not by itself mean the coordinate is wrong and does not by itself lower location confidence.
+- OSM may describe cellular, microwave, broadcast, public-safety, or shared infrastructure.
+- A nearby tower does not prove the APRS station is installed on that structure.
+- OSM coverage is incomplete.
 
-## OpenStreetMap corroboration
+Signal Peak does not silently move a station to an OSM feature. Human review is required before changing the model coordinate.
 
-Viewshed can query nearby OSM communications infrastructure through Overpass.
+## Corrections workflow
 
-Current interpretation is conservative:
+1. Acquire or load stations.
+2. Open **Corrections**.
+3. Review stations in the Needs Review queue; use **Show All** when needed.
+4. Compare reported/model coordinates with Standard/Topo map context and OSM evidence.
+5. Select or enter a proposed coordinate when a correction is justified.
+6. Save/approve the correction.
 
-- Very close communications-site agreement can automatically corroborate the existing APRS/seed coordinate and raise its confidence.
-- A moderate match is shown as supporting context.
-- A distant match can keep weak-provenance coordinates in the review queue because the datasets do not agree closely.
-- No match is not treated as evidence that the station is wrong because OSM is incomplete.
-- Strong APRS-IS/aprs.fi provenance is not automatically invalidated by an unrelated nearby OSM site.
+Reviewed corrections are stored under `ViewshedData/station_location_overrides.json` and are reapplied after station acquisition.
 
-OSM corroboration changes confidence in the existing coordinate. It does not automatically move the station.
+## Relationship to Station Data
 
-## Corrections queue
+Signal Peak 1.2.0 stores RF edits separately in `ViewshedData/station_rf_overrides.json`.
 
-The default Corrections list shows stations needing review and sorts lowest confidence first.
+Changing RF height, power, gain, frequency, or path-loss assumptions does **not** change the station coordinate. Likewise, correcting a coordinate does not create or alter RF assumptions.
 
-Controls include:
+This separation lets live APRS data refresh, reviewed coordinate corrections, and manually curated RF information coexist without overwriting one another.
 
-- **Show All / Needs Review**
-- **Next**
-- **Cross-check OSM**
-- **Use OSM point**
-- **Topo / Standard** basemap selection
-- **Save as candidate**
-- **Approve correction**
-- **Remove my override**
+## Caution
 
-Saving or approving normally advances to the next station. If the review queue becomes empty, the UI falls back to the full catalog rather than making the station list appear to disappear.
-
-## Candidate vs reviewed
-
-A candidate stores a proposed coordinate and provenance for later review but does not affect propagation.
-
-A reviewed correction becomes the model coordinate. The original reported coordinate remains stored for auditing and display.
-
-## OSM point as a proposal
-
-**Use OSM point** copies the nearest matched communications feature into the proposal fields and records OSM/Overpass as the source. The user must still approve the correction.
-
-This matters because an OSM communications tower may be cellular, microwave, commercial broadcast, public safety, shared infrastructure, or unrelated to the APRS station.
-
-## Future DEM assistance
-
-A future correction enhancement is planned to show DEM-derived elevations and terrain plausibility warnings. Those checks must remain advisory and must not silently move a transmitter to a nearby summit or ridgeline.
+A station name or mountaintop name is not enough by itself to justify a correction. Use the strongest available evidence and preserve uncertainty when the actual installation cannot be verified.
