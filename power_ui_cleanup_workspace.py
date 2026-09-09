@@ -26,7 +26,7 @@ class ViewshedWorkspace(_FeatureWorkspace):
         """Present reverse HAAT as an estimator of antenna height above the site."""
         replacements = {
             "Solve the antenna height AGL required to reach a target FCC-style HAAT using 8 radials and terrain from 2–10 miles.": (
-                "Enter a known/published HAAT to estimate the antenna height above the station site (AGL) "
+                "Enter a known/published FCC-style HAAT to estimate the antenna height above the station site (AGL) "
                 "using 8 radials and terrain from 2–10 miles."
             ),
             "Target HAAT": "Known / published HAAT",
@@ -51,7 +51,7 @@ class ViewshedWorkspace(_FeatureWorkspace):
             self.haat_btn.configure(text="Estimate antenna height above site")
             self.haat_unit_label.configure(text="input follows Metric / Imperial selection")
             self.haat_status.set(
-                "Enter the station's known/published HAAT. The result will be antenna height above site (AGL)."
+                "Enter the station's known/published FCC-style HAAT. The result will be antenna height above site (AGL)."
             )
         except Exception:
             pass
@@ -80,24 +80,33 @@ class ViewshedWorkspace(_FeatureWorkspace):
         )
 
     def _finish_reverse_haat(self, result: dict) -> None:
-        """Make antenna AGL the primary reverse-HAAT result and show both units."""
+        """Make antenna AGL primary and reject physically incompatible HAAT inputs."""
         self.haat_btn.configure(state="normal")
         agl_m = float(result["required_antenna_agl_m"])
-        agl_ft = agl_m / M_PER_FT
         site_m = float(result["site_elevation_m"])
         terrain_m = float(result["average_terrain_m"])
         published_m = float(result["target_haat_m"])
+        terrain_advantage_m = site_m - terrain_m
 
-        detail = (
-            f"Published HAAT: {published_m:.1f} m / {published_m / M_PER_FT:.1f} ft · "
-            f"site ground: {site_m:.1f} m AMSL · "
-            f"average 2–10 mi terrain: {terrain_m:.1f} m AMSL"
-        )
         if agl_m < 0:
-            detail += " · WARNING: negative AGL suggests the HAAT value, units, or site coordinates are inconsistent."
+            self.haat_status.set(
+                "Published HAAT is incompatible with this site under the FCC-style HAAT definition.\n"
+                f"Site terrain advantage at 0 ft AGL: {terrain_advantage_m / M_PER_FT:.1f} ft / {terrain_advantage_m:.1f} m. "
+                f"That is the minimum HAAT an antenna at ground level could have here.\n"
+                f"Entered HAAT: {published_m / M_PER_FT:.1f} ft / {published_m:.1f} m · "
+                f"site ground: {site_m / M_PER_FT:.1f} ft / {site_m:.1f} m AMSL · "
+                f"average 2–10 mi terrain: {terrain_m / M_PER_FT:.1f} ft / {terrain_m:.1f} m AMSL.\n"
+                "Check whether the source value is actually FCC HAAT, antenna AGL, or elevation AMSL, and verify its units."
+            )
+            return
 
+        agl_ft = agl_m / M_PER_FT
         self.haat_status.set(
-            f"Estimated antenna height above site (AGL): {agl_ft:.1f} ft / {agl_m:.1f} m\n{detail}"
+            f"Estimated antenna height above site (AGL): {agl_ft:.1f} ft / {agl_m:.1f} m\n"
+            f"Published HAAT: {published_m / M_PER_FT:.1f} ft / {published_m:.1f} m · "
+            f"site terrain advantage: {terrain_advantage_m / M_PER_FT:.1f} ft / {terrain_advantage_m:.1f} m · "
+            f"site ground: {site_m / M_PER_FT:.1f} ft / {site_m:.1f} m AMSL · "
+            f"average 2–10 mi terrain: {terrain_m / M_PER_FT:.1f} ft / {terrain_m:.1f} m AMSL"
         )
 
     def run_custom(self) -> None:
