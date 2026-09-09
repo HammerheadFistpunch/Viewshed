@@ -22,7 +22,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         saved = str(self._ui_prefs.get("measurement_units", "metric")).lower()
         self.unit_mode = tk.StringVar(value="imperial" if saved == "imperial" else "metric")
         self._display_unit_mode = "metric"
-        self._build_tools_tab()
+        self._build_advanced_unit_selector()
         if self.unit_mode.get() == "imperial":
             self._apply_unit_mode()
 
@@ -152,12 +152,23 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         """Compatibility no-op retained for the station-data workspace chain."""
         return
 
-    def _build_tools_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Tools")
+    def _advanced_tab_frame(self):
+        """Return the existing Advanced notebook page without coupling to its builder."""
+        for tab_id in self.notebook.tabs():
+            try:
+                if self.notebook.tab(tab_id, "text") == "Advanced":
+                    return self.nametowidget(tab_id)
+            except Exception:
+                continue
+        return None
+
+    def _build_advanced_unit_selector(self) -> None:
+        tab = self._advanced_tab_frame()
+        if tab is None:
+            return
 
         units = ttk.LabelFrame(tab, text="Input units", padding=10)
-        units.pack(fill="x")
+        units.pack(fill="x", pady=(10, 0))
         ttk.Label(
             units,
             text="Choose how distance and height fields are entered and displayed. Internal propagation math remains metric.",
