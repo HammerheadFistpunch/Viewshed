@@ -26,6 +26,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self.unit_mode = tk.StringVar(value="imperial" if saved == "imperial" else "metric")
         self._display_unit_mode = "metric"
         self._build_tools_tab()
+        self._sync_haat_station_catalog()
         if self.unit_mode.get() == "imperial":
             self._apply_unit_mode()
 
@@ -151,6 +152,44 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         with self._metric_values(((self.custom_radius, KM_PER_MI), (self.custom_height, M_PER_FT))):
             return super()._draw_custom(initial=initial)
 
+    def reload_station_catalog(self) -> None:
+        super().reload_station_catalog()
+        self._sync_haat_station_catalog()
+
+    def _set_station_catalog(self, records: list[dict], source_label: str) -> None:
+        super()._set_station_catalog(records, source_label)
+        self._sync_haat_station_catalog()
+
+    def _sync_haat_station_catalog(self) -> None:
+        combo = getattr(self, "haat_station_combo", None)
+        if combo is None:
+            return
+        calls = sorted(getattr(self, "_station_records", {}).keys())
+        combo["values"] = calls
+        current = self.haat_station_call.get().strip().upper()
+        if current not in getattr(self, "_station_records", {}):
+            self.haat_station_call.set("")
+        if calls:
+            self.haat_station_status.set(
+                f"{len(calls)} station(s) available. Selecting one fills its reviewed coordinates; manual coordinates remain editable."
+            )
+        else:
+            self.haat_station_status.set("No station catalog is loaded. Enter latitude/longitude manually or load stations from the Station tab.")
+
+    def _haat_station_selected(self, _event=None) -> None:
+        call = self.haat_station_call.get().strip().upper()
+        rec = getattr(self, "_station_records", {}).get(call)
+        if not rec:
+            return
+        try:
+            self.haat_lat.set(f"{float(rec['lat']):.6f}")
+            self.haat_lon.set(f"{float(rec['lon']):.6f}")
+        except (KeyError, TypeError, ValueError):
+            self.haat_station_status.set(f"{call} does not have usable coordinates.")
+            return
+        source = str(rec.get("_location_confidence") or rec.get("_source") or "catalog")
+        self.haat_station_status.set(f"{call} selected — coordinates loaded from {source}. You can edit them before calculating.")
+
     def _build_tools_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Tools")
@@ -166,18 +205,27 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         box = ttk.LabelFrame(tab, text="Reverse HAAT calculator", padding=10)
         box.pack(fill="x", pady=(12, 0))
         ttk.Label(box, text="Solve the antenna height AGL required to reach a target FCC-style HAAT using 8 radials and terrain from 2–10 miles.", wraplength=850).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        self.haat_station_call = tk.StringVar(value="")
+        self.haat_station_status = tk.StringVar(value="Select a station or enter coordinates manually.")
         self.haat_lat = tk.StringVar(value="40.7608")
         self.haat_lon = tk.StringVar(value="-111.8910")
         self.haat_target = tk.StringVar(value="300")
         self.haat_status = tk.StringVar(value="Enter a site and target HAAT, then calculate.")
-        for row_index, (label, var) in enumerate((("Latitude", self.haat_lat), ("Longitude", self.haat_lon), ("Target HAAT", self.haat_target)), start=1):
+
+        ttk.Label(box, text="Station").grid(row=1, column=0, sticky="w", pady=3)
+        self.haat_station_combo = ttk.Combobox(box, textvariable=self.haat_station_call, width=24, state="readonly")
+        self.haat_station_combo.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=3)
+        self.haat_station_combo.bind("<<ComboboxSelected>>", self._haat_station_selected)
+        ttk.Label(box, textvariable=self.haat_station_status, wraplength=520).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=3)
+
+        for row_index, (label, var) in enumerate((("Latitude", self.haat_lat), ("Longitude", self.haat_lon), ("Target HAAT", self.haat_target)), start=2):
             ttk.Label(box, text=label).grid(row=row_index, column=0, sticky="w", pady=3)
             ttk.Entry(box, textvariable=var, width=18).grid(row=row_index, column=1, sticky="w", padx=(8, 0), pady=3)
         self.haat_unit_label = ttk.Label(box, text="m (or ft in Imperial mode)")
-        self.haat_unit_label.grid(row=3, column=2, sticky="w", padx=(8, 0))
+        self.haat_unit_label.grid(row=4, column=2, sticky="w", padx=(8, 0))
         self.haat_btn = ttk.Button(box, text="Calculate required antenna AGL", command=self._start_reverse_haat)
-        self.haat_btn.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(box, textvariable=self.haat_status, wraplength=850).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self.haat_btn.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(box, textvariable=self.haat_status, wraplength=850).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     def _start_reverse_haat(self) -> None:
         try:
