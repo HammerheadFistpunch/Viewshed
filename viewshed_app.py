@@ -53,8 +53,8 @@ class ViewshedApp(tk.Tk):
         super().__init__()
         os.environ[USER_OVERRIDE_ENV] = str(user_override_path())
         self.title(f"Viewshed {APP_VERSION}")
-        self.geometry("1280x900")
-        self.minsize(1000, 720)
+        self.geometry("1280x1000")
+        self.minsize(1000, 800)
         self._settings = _load_settings()
         self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self._last_output: Path | None = None
