@@ -1,6 +1,6 @@
 # Signal Peak CONUS Support
 
-Signal Peak 1.1.0 removes the propagation pipeline's remaining Utah-only station-validation and projection assumptions while retaining the established per-station ITM/Longley-Rice worker.
+Signal Peak 1.2.0 retains the CONUS-oriented station validation, terrain acquisition, and projection work introduced in 1.1.0 while adding per-station RF assumptions and operator-selectable display units.
 
 ## Geographic behavior
 
@@ -14,11 +14,11 @@ Examples:
 - Denver, Colorado: UTM 13N / EPSG:32613
 - New York City, New York: UTM 18N / EPSG:32618
 
-The projected working DEM is named by selected zone, such as `region_dem_utm_z10N.tif`, preventing a projection cached for one zone from being silently reused in another.
+The projected working DEM is named by selected zone, preventing a projection cached for one zone from being silently reused in another.
 
 ## Station validation
 
-The legacy worker originally rejected stations outside a hard-coded Utah latitude/longitude box. Signal Peak 1.1.0 replaces that loader validation with normal WGS84 coordinate validation, allowing regional jobs throughout the contiguous United States.
+The legacy worker originally rejected stations outside a hard-coded Utah latitude/longitude box. Current Signal Peak uses normal WGS84 coordinate validation, allowing regional jobs throughout the contiguous United States.
 
 ## Terrain source
 
@@ -28,11 +28,15 @@ The legacy source module still contains some Utah-oriented internal filenames. T
 
 ## Elevation checks
 
-The CONUS adapter uses broad physical sanity limits of approximately -200 to 5000 m while retaining the local DEM-pit check. This avoids rejecting legitimate low- or high-elevation sites solely because they are outside Utah's typical terrain range.
+The CONUS adapter uses broad physical sanity limits while retaining local DEM validation so legitimate low- and high-elevation sites are not rejected solely because they are outside Utah's typical terrain range.
 
 ## Modeling behavior
 
-CONUS support does not replace the established per-station ITM math. Area, Station, and Custom continue to use the same terrain-profile/link-margin foundation, with explicitly configured radio assumptions.
+CONUS support does not replace the established per-station ITM math. Area, Station, and Custom continue to use the same terrain-profile/link-margin foundation.
+
+In 1.2.0, different stations in the same Area job may use different height, TX power, gain, frequency, or path-loss assumptions when reliable station-specific data has been supplied. Missing values continue to use Advanced/global fallbacks.
+
+The Metric/Imperial selector affects only operator-facing input/display units. Geographic coordinates remain WGS84 and the propagation backend continues to use metric projected coordinates.
 
 ## Current limits
 

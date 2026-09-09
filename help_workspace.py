@@ -13,7 +13,7 @@ from viewshed_core import portable_data_root, resource_path
 
 
 PRODUCT_NAME = "Signal Peak"
-PRODUCT_VERSION = "1.1.0"
+PRODUCT_VERSION = "1.2.0"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 
 viewshed_core.APP_VERSION = PRODUCT_VERSION
@@ -29,7 +29,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         ("GNU GPL v2 License", "LICENSE"),
         ("Quick Start", "docs/QUICK_START.md"),
         ("User Guide", "docs/USER_GUIDE.md"),
-        ("1.1.0 Release Notes", "docs/RELEASE_NOTES_1.1.0.md"),
+        ("1.2.0 Release Notes", "docs/RELEASE_NOTES_1.2.0.md"),
         ("Propagation Model", "docs/PROPAGATION_MODEL.md"),
         ("CONUS support", "docs/CONUS.md"),
         ("Station Data", "docs/STATION_DATA.md"),
@@ -461,6 +461,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
                 f"Application data: {portable_data_root()}\n"
                 "Advanced settings: ViewshedData/advanced_settings.json\n"
                 "Station corrections: ViewshedData/station_location_overrides.json\n"
+                "Station RF overrides: ViewshedData/station_rf_overrides.json\n"
                 "Jobs: ViewshedData/jobs/<timestamp>/\n"
                 "aprs.fi API keys are session-only and are not retained in settings.json."
             ),
@@ -477,11 +478,11 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         ttk.Label(
             caution,
             text=(
-                "Area and Station results use explicit reference assumptions because APRS normally does not provide "
-                "reliable station ERP, antenna pattern, feedline loss, or installation-height data. The reference "
-                "profile uses a 138 dB operational path-loss cap plus reduced lateral radial fill to avoid overstating "
-                "marginal canyon coverage. Custom mode uses a 20 dB operational reserve. Coverage is a prediction, "
-                "not a communications guarantee."
+                "Area and Station results use explicit fallback assumptions when reliable per-station RF data is not "
+                "available. Station Data overrides can improve those assumptions, but manually entered values are only "
+                "as reliable as their source. The reference profile uses a 138 dB operational path-loss cap plus "
+                "reduced lateral radial fill to avoid overstating marginal canyon coverage. Custom mode uses a 20 dB "
+                "operational reserve. Coverage is a prediction, not a communications guarantee."
             ),
             wraplength=900,
         ).pack(anchor="w")

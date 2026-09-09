@@ -1,6 +1,6 @@
 # Signal Peak Quick Start
 
-This is the shortest path from launching Signal Peak 1.1.0 to producing a coverage result.
+This is the shortest path from launching Signal Peak 1.2.0 to producing a coverage result.
 
 ## 1. Launch Signal Peak
 
@@ -12,59 +12,63 @@ Persistent data is stored under `ViewshedData/` beside the executable when possi
 
 1. Open **Area**.
 2. Click the map or enter a center latitude/longitude.
-3. Set **Area radius** for the region you want to inspect.
-4. Set **Max calculation range** for each station. This is a hard computation limit, not a predicted RF boundary.
+3. Set **Area radius**.
+4. Set **Max calculation range** for each station.
 5. Choose Digipeaters and/or iGates.
 6. Click **Find stations**.
 
-Signal Peak samples APRS-IS, merges cache/seed data, applies reviewed corrections, and can cross-check nearby OpenStreetMap communications infrastructure. Finding stations does not run the terrain propagation engine.
+Finding stations does not run terrain propagation. Signal Peak samples APRS-IS, merges cache/seed data, applies reviewed coordinate corrections, and can cross-check nearby OpenStreetMap communications infrastructure.
 
 ## 3. Review station locations
 
-If the Area panel reports stations needing review, open **Corrections**. Use the topo/standard basemap, OSM cross-check, and human-reviewed correction tools as needed. OSM corroboration does not automatically relocate a station.
+If the Area panel reports stations needing review, open **Corrections**. OSM corroboration is evidence only and does not automatically move a station.
 
-## 4. Set radio and output assumptions
+## 4. Review station RF data
 
-Open **Advanced** for Area/Station radio assumptions. TX power can be entered in **Watts or dBm**; Watts are converted to dBm internally before link-budget math.
+Open **Station Data** when you have known station-specific RF information.
 
-Open **Output** for presentation controls:
+The table can be sorted by callsign, type, position, height, power, gain, frequency, path-loss cap, or RF source. Double-click an editable RF cell to change it, then click **Save edits**.
 
-- granular network heatmap band size (default 3 dB)
-- maximum displayed margin
-- per-station display floor
-- overlay/inverse opacity
+Saved per-station values take precedence over station JSON and Advanced defaults. They are stored separately from APRS/cache position data and survive station refreshes.
 
-These output controls change presentation, not the underlying ITM path-loss calculation.
+## 5. Set radio, units, and output assumptions
 
-## 5. Run propagation
+Open **Advanced** for Area/Station radio assumptions. TX power can be entered in **Watts or dBm**.
+
+Advanced also contains the input-unit selector:
+
+- **Metric** — km / m
+- **Imperial** — mi / ft
+
+This changes input/display units only. Signal Peak converts values before the job reaches the propagation engine, which remains metric internally.
+
+Open **Output** for presentation controls such as heatmap band size, maximum displayed margin, per-station display floor, and opacity.
+
+## 6. Run propagation
 
 Return to **Area** and click **Run area propagation**. The job log shows terrain preparation, propagation, merge, and export progress. Cached DEM tiles are retained for future runs.
 
-## 6. Open the result
+## 7. Open the result
 
 After completion use **Open Output Folder**, **Open KMZ**, or **Open GeoTIFF**.
 
 The KMZ contains:
 
-- **Granular Network Margin** — visible by default; best remaining modeled link margin from any included station, displayed in configurable dB bands.
-- **Inverse Coverage — APRS Not Expected** — off by default; cells inside the requested analysis region where no included station has positive modeled margin.
-- **Per-station viewsheds** — individual digipeater/iGate overlays for inspection.
+- **Granular Network Margin** — best remaining modeled link margin from any included station.
+- **Inverse Coverage — APRS Not Expected** — cells where no included station has positive modeled margin.
+- **Per-station viewsheds** — individual digipeater/iGate overlays.
 
-The legend matches the configured network banding. **0 dB remaining margin is the modeled operational edge.**
+**0 dB remaining margin is the modeled operational edge.**
 
-Job files are stored under:
-
-```text
-ViewshedData/jobs/<timestamp>/output/
-```
+Job files are stored under `ViewshedData/jobs/<timestamp>/output/`.
 
 ## Station mode
 
-After an Area station search, the Station tab shows only that search's station set. Use **Load full cached catalog** when you intentionally want the cumulative station cache. Station mode produces the same network-margin/inverse products, with one station contributing.
+After an Area station search, the Station tab shows only that search's station set. Use **Load full cached catalog** when you intentionally want the cumulative station cache.
 
 ## Default reference profile
 
-Area and Station modes use a practical reference profile including:
+Area and Station modes use fallback assumptions including:
 
 - 144.390 MHz
 - 50 W TX power (approximately 47 dBm)
@@ -77,8 +81,8 @@ Area and Station modes use a practical reference profile including:
 - 2 m observer/receiver height
 - 1080 radials per station
 
-These are assumptions, not measured parameters for each APRS site.
+Known per-station RF values override these fallbacks when present.
 
 ## Important limitation
 
-Signal Peak predicts terrain-dependent VHF coverage. It does not know every site's actual ERP, antenna pattern, feedline loss, clutter, foliage, local noise, weather, receiver installation, or maintenance state. Treat output as an analysis/planning product, not a communications guarantee.
+Signal Peak predicts terrain-dependent VHF coverage. It does not know every site's actual antenna pattern, feedline loss, clutter, local noise, or maintenance state. Treat output as an analysis/planning product, not a communications guarantee.

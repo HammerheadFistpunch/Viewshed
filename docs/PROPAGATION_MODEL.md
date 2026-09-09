@@ -26,7 +26,7 @@ A station-count raster is also produced for compatibility/GIS use, but it is not
 
 ## Reference Area/Station profile
 
-Default Area and Station assumptions are currently:
+Default Area and Station fallback assumptions are currently:
 
 - Frequency: 144.390 MHz
 - TX power: 50 W (approximately 47 dBm)
@@ -43,7 +43,29 @@ Default Area and Station assumptions are currently:
 
 Area/Station TX power may be entered in Watts or dBm. Watts are converted to dBm before link-budget math.
 
-These values are a reference profile because APRS normally does not provide reliable station ERP, antenna pattern, feedline loss, or installation-height metadata.
+## Per-station RF resolution in 1.2.0
+
+Signal Peak 1.2.0 can resolve RF assumptions independently for each station in the same Area run.
+
+Effective precedence is:
+
+1. callsign-based user RF override saved from the Station Data editor;
+2. RF field already present in the station JSON/record;
+3. Advanced/global fallback.
+
+Supported station-level fields are:
+
+- `antenna_height_m` or `antenna_height_agl_m`
+- `tx_power_dbm` or `tx_power_w`
+- `tx_antenna_gain_dbd` or `tx_antenna_gain_dbi`
+- `freq_mhz`
+- `max_path_loss_db`
+
+A station only overrides the fields it provides. Missing fields continue to use Advanced/global assumptions.
+
+When station-specific power/gain/path-loss data is present, Signal Peak discards the worker's pre-resolved global link budget and recomputes the effective budget for that station. Watts are converted to dBm and dBi is converted to dBd before the legacy worker runs.
+
+The Metric/Imperial selector is an operator-interface feature only. Distance and height inputs may be displayed/entered as miles/feet, but they are converted to kilometers/meters before propagation.
 
 ## Link margin
 
@@ -59,13 +81,11 @@ At the default 138 dB cap:
 - approximately 0 dB is the reference operational edge;
 - below-threshold values are not treated as reliable operational coverage.
 
-The operational path-loss cap is a practical modeling assumption rather than a physical constant. The 138 dB reference cap is deliberately more conservative than the earlier 148 dB profile.
-
-Custom stations calculate their cap from the entered transmitter power and antenna gain, the reference receiver assumptions, and a 20 dB operational reserve.
+The operational path-loss cap is a practical modeling assumption rather than a physical constant. Custom stations calculate their cap from the entered transmitter power and antenna gain, the reference receiver assumptions, and a 20 dB operational reserve.
 
 ## Network best-margin heatmap
 
-For each successfully modeled station, Signal Peak has a per-station remaining-margin raster. The 1.1.0 network heatmap reprojects those rasters to the common analysis grid and keeps the highest available margin at each cell:
+For each successfully modeled station, Signal Peak has a per-station remaining-margin raster. The network heatmap, introduced in 1.1.0 and retained in 1.2.0, reprojects those rasters to the common analysis grid and keeps the highest available margin at each cell:
 
 ```text
 network best margin(cell) = max(station margin(cell))
@@ -97,7 +117,7 @@ These values are technical model parameters. Changing them can materially change
 
 Signal Peak obtains USGS 3DEP 1-arcsecond elevation data and maintains a shared DEM cache under `ViewshedData/cache/dem/`.
 
-Version 1.1.0 selects a local UTM CRS from each job's geography rather than using a fixed Utah/Zone-12 projection. Station validation likewise uses normal WGS84 coordinate bounds rather than the old Utah bounding box.
+The CONUS work introduced in 1.1.0 selects a local UTM CRS from each job's geography rather than using a fixed Utah/Zone-12 projection. Signal Peak 1.2.0 retains that behavior.
 
 For large requests, Signal Peak bounds analysis size and can downsample to an analysis-safe raster. Small analyses retain substantially more native terrain detail; very large analyses trade resolution for bounded memory and practical runtime.
 
@@ -114,7 +134,6 @@ Coverage between sampled radials requires a small amount of raster gap filling. 
 Current results do not fully represent:
 
 - exact antenna radiation pattern
-- actual ERP/EIRP per site
 - feedline and connector loss
 - antenna efficiency and mounting loss
 - buildings and detailed urban clutter
@@ -124,4 +143,4 @@ Current results do not fully represent:
 - weather-specific ducting or anomalous propagation
 - station hardware condition and maintenance state
 
-The legacy propagation module still has a Utah-oriented filename, but that filename is implementation history rather than an active 1.1.0 geographic restriction.
+Per-station values improve the input assumptions when reliable information is available; they do not remove these modeling limitations.

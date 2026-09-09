@@ -1,8 +1,8 @@
 # Signal Peak Roadmap
 
-This roadmap reflects the state of Signal Peak 1.1.0. The guiding principle remains: UI and output improvements must not silently change the established terrain/ITM/link-margin foundation.
+This roadmap reflects the state of Signal Peak 1.2.0. The guiding principle remains: UI and data-quality improvements must not silently change the established terrain/ITM/link-margin foundation.
 
-## Completed through 1.1.0
+## Completed through 1.2.0
 
 ### Regional operation
 
@@ -32,6 +32,22 @@ This roadmap reflects the state of Signal Peak 1.1.0. The guiding principle rema
 - [x] Use 1080 reference radials with reduced lateral gap fill.
 - [x] Provide persistent Advanced Area/Station assumptions.
 - [x] Allow Area/Station TX power entry in Watts or dBm while keeping dBm internally.
+- [x] Allow per-station height, TX power, gain, frequency, and path-loss overrides.
+- [x] Resolve station RF values with user override → station JSON → Advanced fallback precedence.
+
+### Station data workflow
+
+- [x] Add a spreadsheet-style Station Data tab.
+- [x] Sort by callsign, station type, position, height, power, gain, frequency, path-loss cap, or source.
+- [x] Filter digipeaters and iGates.
+- [x] Edit RF fields in place and save callsign-based overrides.
+- [x] Store RF overrides separately from APRS/cache position records so refreshes do not erase curated RF data.
+
+### Operator units
+
+- [x] Add Metric / Imperial input-display selection in Advanced.
+- [x] Keep all propagation backend distance/height calculations metric.
+- [x] Convert Imperial values before jobs reach the propagation engine.
 
 ### Network output presentation
 
@@ -51,7 +67,7 @@ This roadmap reflects the state of Signal Peak 1.1.0. The guiding principle rema
 ### Documentation
 
 - [x] Maintain bundled Quick Start, User Guide, Propagation Model, Station Data, Location Corrections, Outputs, Troubleshooting, dependency/license notes, Special Considerations, and CONUS documentation.
-- [x] Add 1.1.0 release notes.
+- [x] Add 1.1.0 and 1.2.0 release notes.
 - [x] Provide offline Help/About access to bundled documentation.
 
 ## Next recommended work
@@ -60,40 +76,26 @@ This roadmap reflects the state of Signal Peak 1.1.0. The guiding principle rema
 
 Collect controlled comparisons between modeled margin and observed APRS/mobile reception. Use those results to evaluate the 138 dB reference cap, antenna assumptions, and whether named field profiles are justified.
 
-### 2. Preserve below-threshold margin explicitly
+### 2. Improve station RF provenance
 
-The current operational per-station raster intentionally collapses below-threshold cells to nodata. A future diagnostic raster could preserve negative modeled margin with a distinct nodata sentinel. That would make it possible to map *how far below threshold* a dead zone is, rather than only where positive operational coverage is absent.
+Add optional source/provenance notes and confidence metadata for manually curated RF overrides so measured values, published values, APRS PHG-derived values, and operator estimates are distinguishable.
 
-This should be added as a separate diagnostic product so it cannot be confused with the current operational coverage surface.
+### 3. Preserve below-threshold margin explicitly
 
-### 3. DEM-assisted correction review
+The current operational per-station raster intentionally collapses below-threshold cells to nodata. A future diagnostic raster could preserve negative modeled margin with a distinct nodata sentinel.
 
-Add read-only terrain context to Corrections:
+### 4. DEM-assisted correction review
 
-- elevation at reported/model/proposed coordinates
-- local elevation delta
-- optional hillshade
-- conservative terrain-plausibility warnings
+Add read-only terrain context to Corrections, including elevation at reported/model/proposed coordinates, local elevation delta, optional hillshade, and conservative terrain-plausibility warnings. Terrain context should never automatically relocate a station.
 
-Terrain context should never automatically relocate a station.
+### 5. Large-region projection strategy
 
-### 4. Large-region projection strategy
+Signal Peak currently uses one local UTM CRS per job. If nationwide or very broad multi-zone jobs become important, evaluate a projection/mosaicking strategy designed for that scale.
 
-Signal Peak currently uses one local UTM CRS per job. Regional jobs are the target use case. If nationwide or very broad multi-zone jobs become important, evaluate a projection/mosaicking strategy designed for that scale.
+### 6. Output/GIS refinement
 
-### 5. Output/GIS refinement
+Consider explicit metadata when useful margin reaches the configured calculation boundary, cleaner export of network best-margin and inverse GeoTIFFs, and machine-readable run metadata summarizing radio, station overrides, heatmap, projection, and terrain settings.
 
-Consider:
+### 7. Release engineering
 
-- explicit metadata when useful margin reaches the configured calculation boundary
-- cleaner export of network best-margin and inverse GeoTIFFs into the primary output folder
-- machine-readable run metadata summarizing radio, heatmap, projection, and terrain settings
-
-### 6. Release engineering
-
-Continue improving:
-
-- dependency pinning and audit records
-- source/binary release pairing required by GPLv2
-- checksums for published Windows artifacts
-- automated tests for non-Utah station validation, UTM selection, heatmap band generation, and KMZ layer visibility
+Continue improving dependency pinning, source/binary release pairing required by GPLv2, checksums for published Windows artifacts, and automated tests for per-station RF resolution, unit conversion, CONUS station validation, UTM selection, heatmap band generation, and KMZ layer visibility.
