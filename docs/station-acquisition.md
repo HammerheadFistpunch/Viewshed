@@ -1,27 +1,59 @@
-# Station acquisition
+# Station Acquisition
 
-Viewshed 0.2 uses a local station cache so viewshed generation does not require a 24-hour capture before every run.
+Signal Peak 1.2.0 uses live APRS observation, a persistent station cache, optional seed/fallback data, reviewed location corrections, and independent RF overrides. A long capture is not required before every propagation run.
 
-## Normal flow
+## Normal Area flow
 
-1. The bundled station JSON (or a user-selected compatible JSON) is used as seed/fallback data.
-2. `ViewshedData/cache/stations.json` is reused when it is less than six hours old **and** covers the requested acquisition area.
-3. Otherwise the worker opens a short APRS-IS connection using a range filter centered on the requested area. The default observation window is 45 seconds.
-4. Digipeaters are inferred from used APRS path entries and digipeater symbols. iGates are inferred from APRS-IS q-construct entry stations.
-5. Position packets heard during the observation are merged into the cache.
-6. If an aprs.fi API key is configured, discovered infrastructure calls without a position are looked up in batches through aprs.fi and merged into the same cache.
-7. If live services are unavailable, the application continues with cached/seed data.
+1. The optional seed/fallback JSON supplies known stations when available.
+2. `ViewshedData/cache/stations.json` supplies previously observed station records.
+3. When refreshing, Signal Peak opens a short receive-only APRS-IS connection using a range filter centered on the requested area.
+4. Digipeaters are inferred from APRS path use and relevant symbols; iGates are inferred from APRS-IS q-construct entry stations.
+5. Position packets heard during the sample are merged into the cache.
+6. If an aprs.fi API key is supplied for the session, unresolved discovered infrastructure calls may be looked up in batches and merged into the cache.
+7. Reviewed location corrections are applied after acquisition.
+8. Saved station RF overrides are applied separately by callsign.
+9. The Area search filters the resulting station set to the requested acquisition region and selected station types.
 
-## Optional settings
+If live services are unavailable, the application can continue with cached/seed records where possible.
 
-For the current 0.2 build these are environment variables. A settings panel is planned for the GUI.
+## UI settings
 
-- `VIEWSHED_APRS_CALLSIGN` — callsign used for the read-only APRS-IS login. If omitted, `N0CALL` is used with pass `-1`.
-- `VIEWSHED_APRSFI_API_KEY` — the user's own aprs.fi API key. It is never committed to the repository.
-- `VIEWSHED_LIVE_REFRESH_SECONDS` — APRS-IS observation time when refreshing, from `0` to `300` seconds. Default: `45`.
+Current acquisition controls are available in the application header rather than requiring environment variables:
 
-The aprs.fi API is used only in response to a user-started viewshed job and only for specific callsigns discovered or already known. It is not used for background harvesting.
+- **APRS callsign** — optional callsign for receive-only APRS-IS login.
+- **aprs.fi key** — optional, session-only API key.
+- **Live sample (s)** — observation duration for the Area refresh.
+- **Optional seed/fallback** — optional compatible station JSON.
+- **Build Seed…** — longer collection workflow for building reusable seed data.
+
+Environment variables remain supported by lower-level components where documented, but the normal desktop workflow does not require them.
+
+## Cache versus RF overrides
+
+The station cache describes observed infrastructure and position/status data. It should be allowed to refresh.
+
+Manually curated RF values are stored separately in:
+
+```text
+ViewshedData/station_rf_overrides.json
+```
+
+This design prevents APRS/cache refreshes from erasing researched antenna height, power, gain, frequency, or path-loss assumptions.
+
+## Area versus Station catalog scope
+
+After **Find stations**, the Station and Station Data views use the current run-scoped station catalog. Use **Load full cached catalog** in Station mode when the cumulative cache is desired instead.
+
+## Seed Builder
+
+The Seed Builder performs a longer APRS collection than the normal Area refresh and writes reusable JSON under `ViewshedData/seeds/` by default. Seed data is fallback/provenance data; it does not supersede stronger live data or reviewed corrections.
+
+## aprs.fi use
+
+The aprs.fi API is optional and is used only in response to user-started acquisition work. The API key is treated as session-only and is not intentionally persisted by Signal Peak.
+
+APRS PHG-derived RF values should not be treated as surveyed installation data without independent verification.
 
 ## Security
 
-Do not put APRS or aprs.fi credentials in source files. The older experimental Utah scraper that contained embedded credentials has been removed from the current branch. If a credential was previously committed publicly, rotate it; removing it from the latest tree does not erase Git history.
+Do not put APRS or aprs.fi credentials in source files or station seed files. If a credential was previously committed publicly, rotate it; removing it from the latest tree does not erase Git history.
