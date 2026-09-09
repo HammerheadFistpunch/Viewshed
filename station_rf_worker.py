@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import math
 
-from aprs_viewshed_utah_parallel import _process_station as _base_process_station
-
 
 def _station_cfg(station: dict, cfg: dict) -> dict:
     merged = dict(cfg)
@@ -39,13 +37,19 @@ def _station_cfg(station: dict, cfg: dict) -> dict:
 
 
 def process_station(args: tuple):
+    import aprs_viewshed_utah_parallel as engine
+
+    base = getattr(engine, "_station_rf_base_process_station", None)
+    if base is None or base is process_station:
+        raise RuntimeError("Per-station RF worker was not installed correctly.")
     mutable = list(args)
     mutable[6] = _station_cfg(dict(mutable[0]), dict(mutable[6]))
-    return _base_process_station(tuple(mutable))
+    return base(tuple(mutable))
 
 
 def install(engine) -> None:
     if getattr(engine, "_station_rf_override_installed", False):
         return
+    engine._station_rf_base_process_station = engine._process_station
     engine._process_station = process_station
     engine._station_rf_override_installed = True
