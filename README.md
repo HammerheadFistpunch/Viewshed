@@ -1,8 +1,10 @@
-# Signal Peak 1.1.0
+# Signal Peak 1.2.0
 
 **Signal Peak** is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes use the same terrain-profile, Longley-Rice/ITM, path-loss, and link-margin foundation.
 
-Version 1.1.0 expands regional operation beyond Utah, adds a network-level best-margin heatmap and inverse/dead-zone layer, exposes heatmap presentation controls, improves station-list scoping, and allows Area/Station TX power to be entered in Watts or dBm while retaining dBm internally for link-budget math.
+Version 1.2.0 adds persistent per-station RF overrides, a spreadsheet-style Station Data editor, and Metric/Imperial input/display selection in Advanced. The propagation backend remains metric/dBm internally.
+
+Version 1.1.0 introduced CONUS-oriented validation/projection, the network best-margin heatmap, inverse/dead-zone output, run-scoped Station lists, and configurable heatmap presentation.
 
 ## License
 
@@ -16,6 +18,7 @@ Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.
 
 - [Quick Start](docs/QUICK_START.md)
 - [User Guide](docs/USER_GUIDE.md)
+- [1.2.0 Release Notes](docs/RELEASE_NOTES_1.2.0.md)
 - [1.1.0 Release Notes](docs/RELEASE_NOTES_1.1.0.md)
 - [CONUS support](docs/CONUS.md)
 - [Propagation Model](docs/PROPAGATION_MODEL.md)
@@ -24,11 +27,10 @@ Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.
 - [Outputs](docs/OUTPUTS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md)
-- [1.0 Release Readiness](docs/RELEASE_READINESS_1.0.0.md)
 - [Special Considerations](docs/SPECIAL_CONSIDERATIONS.md)
 - [Roadmap](docs/ROADMAP.md)
 
-The packaged Windows application includes these documents under **Help / About**.
+The packaged Windows application includes the current documentation under **Help / About**.
 
 ## Current UI modes
 
@@ -48,9 +50,28 @@ Click a proposed site and supply antenna height, transmitter power in Watts, gai
 
 Review reported/model coordinates, topographic context, confidence, freshness, and OpenStreetMap communications-site corroboration. Reviewed corrections change the modeled coordinate while preserving the reported coordinate and provenance.
 
+### Station Data
+
+The Station Data tab shows all currently loaded stations in a sortable table. Height, TX power, TX gain, frequency, and path-loss cap can be edited in place and saved as persistent callsign-based overrides.
+
+RF precedence is:
+
+1. saved Station Data user override;
+2. RF value already present in station JSON;
+3. Advanced/global fallback.
+
+Saved RF overrides are stored separately from APRS/cache position data, so normal station refreshes do not erase manually curated RF values.
+
 ### Advanced
 
-Area and Station assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, radial count, DEM resolution, and ITM environmental parameters. TX power can be entered in **Watts or dBm**; Signal Peak converts Watts to dBm before running the link-budget calculation.
+Area and Station assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, radial count, DEM resolution, and ITM environmental parameters. TX power can be entered in **Watts or dBm**.
+
+Advanced also contains the **Metric / Imperial** selector. It changes how distance and height fields are entered and displayed:
+
+- Metric: km / m
+- Imperial: mi / ft
+
+Signal Peak converts operator-facing values before creating the propagation job. Internal propagation math remains metric and dBm-based.
 
 ### Output
 
@@ -58,7 +79,7 @@ The Output tab controls the granular network heatmap band size, maximum displaye
 
 ## Reference profile
 
-Current defaults include:
+Current Area/Station defaults include:
 
 - Frequency: 144.390 MHz
 - TX power: 50 W (approximately 47 dBm)
@@ -72,17 +93,17 @@ Current defaults include:
 - Radials: **1080 per station**
 - Reduced lateral radial gap fill
 
-These are explicit modeling assumptions, not measured installation data for each APRS site. Custom mode derives a site-specific budget and applies a 20 dB operational reserve.
+These are fallback modeling assumptions, not measured installation data. In 1.2.0, known station-specific RF values can override the fallback per station.
 
 ## CONUS behavior
 
-Signal Peak chooses the projected UTM CRS from the geographic center of each job. For example, Salt Lake City uses Zone 12N, Denver uses 13N, Los Angeles uses 11N, Yakima uses 10N, and New York City uses 18N. Terrain acquisition uses USGS 3DEP data derived from the requested geography rather than a fixed Utah extent.
+Signal Peak chooses the projected UTM CRS from the geographic center of each job. Terrain acquisition uses USGS 3DEP data derived from the requested geography rather than a fixed Utah extent.
 
-The legacy propagation module retains an old Utah-oriented filename internally, but the active station validation and projection layers are no longer fixed to Utah.
+The legacy propagation module retains an old Utah-oriented filename internally, but the active station validation and projection layers are not fixed to Utah.
 
 ## Network heatmap and inverse coverage
 
-For Area runs, Signal Peak combines the successfully modeled per-station margin rasters into a **best remaining link margin** surface. Each cell represents the strongest modeled remaining margin available from any included station. The default stepped palette runs blue → cyan → green → yellow → orange → red in configurable dB bands.
+For Area runs, Signal Peak combines successfully modeled per-station margin rasters into a **best remaining link margin** surface. Each cell represents the strongest modeled remaining margin available from any included station.
 
 The **Inverse Coverage — APRS Not Expected** layer identifies cells inside the requested analysis region where no modeled station has positive remaining link margin. It is a threshold/dead-zone product, not a measurement of how many dB below threshold a location is.
 
@@ -102,7 +123,7 @@ Jobs are written under:
 ViewshedData/jobs/<timestamp>/output/
 ```
 
-After completion, the UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**. The KMZ opens with the granular network margin layer visible by default and the inverse layer available as a toggle.
+After completion, the UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**.
 
 ## Run from source
 
@@ -121,11 +142,7 @@ python -m pip install -r requirements-build.txt
 pyinstaller --clean --noconfirm viewshed.spec
 ```
 
-The resulting executable is:
-
-```text
-dist/SignalPeak.exe
-```
+The resulting executable is `dist/SignalPeak.exe`.
 
 A packaged smoke test is available:
 
@@ -133,7 +150,7 @@ A packaged smoke test is available:
 SignalPeak.exe --self-test
 ```
 
-GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Signal-Peak-Windows-1.1.0` artifact.
+GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Signal-Peak-Windows-1.2.0` artifact.
 
 ## Modeling caution
 
