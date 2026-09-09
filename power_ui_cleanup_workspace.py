@@ -21,6 +21,29 @@ class ViewshedWorkspace(_FeatureWorkspace):
         # The unit selector belongs in Advanced propagation settings instead.
         _TunedWorkspace._build_custom(self)
 
+    def _haat_station_selected(self, _event=None) -> None:
+        call = self.haat_station_call.get().strip().upper()
+        rec = getattr(self, "_station_records", {}).get(call)
+        if not rec:
+            return
+        try:
+            self.haat_lat.set(f"{float(rec['lat']):.6f}")
+            self.haat_lon.set(f"{float(rec['lon']):.6f}")
+        except (KeyError, TypeError, ValueError):
+            self.haat_station_status.set(f"{call} does not have usable coordinates.")
+            return
+
+        confidence = rec.get("_location_confidence")
+        if isinstance(confidence, dict):
+            source = str(confidence.get("label") or confidence.get("status") or "catalog")
+        elif confidence:
+            source = str(confidence)
+        else:
+            source = str(rec.get("_source") or "catalog")
+        self.haat_station_status.set(
+            f"{call} selected — coordinates loaded ({source}). You can edit them before calculating."
+        )
+
     def run_custom(self) -> None:
         if getattr(self, "_imperial", False):
             with self._metric_values(((self.custom_radius, KM_PER_MI), (self.custom_height, M_PER_FT))):
