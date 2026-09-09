@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import ExitStack
 from pathlib import Path
 
 from dem_sources import _download_tile
@@ -10,6 +11,8 @@ FCC_INNER_KM = 3.218688
 FCC_OUTER_KM = 16.09344
 RADIALS = 8
 SAMPLES_PER_RADIAL = 50
+MIN_VALID_SAMPLES_PER_RADIAL = 35
+NEARBY_VALID_RADIUS_PX = 6
 
 
 def _destination(lat: float, lon: float, bearing_deg: float, distance_km: float) -> tuple[float, float]:
@@ -29,13 +32,65 @@ def _destination(lat: float, lon: float, bearing_deg: float, distance_km: float)
 def _tile_for(lat: float, lon: float) -> tuple[int, int]:
     if lon >= 0:
         raise ValueError("Reverse HAAT currently uses the CONUS/western-hemisphere 3DEP tile adapter.")
+    # dem_sources expects the north edge of the one-degree cell. For example,
+    # 40.76 N / 111.89 W belongs to n40w112, represented here as (41, 112).
     return math.ceil(lat), math.ceil(abs(lon))
+
+
+def _is_valid_value(src, value: float) -> bool:
+    if not math.isfinite(value):
+        return False
+    if src.nodata is not None and abs(value - float(src.nodata)) < 1e-6:
+        return False
+    return True
+
+
+def _sample_with_nearby_fallback(src, lon: float, lat: float, radius_px: int = NEARBY_VALID_RADIUS_PX) -> float | None:
+    """Sample one terrain point, falling back to the nearest valid DEM pixel.
+
+    3DEP tiles can contain isolated nodata pixels and seam-edge artifacts. HAAT
+    should not fail because one nominal sample lands on such a pixel. The
+    fallback is deliberately local (a few 1-arcsecond pixels) so it does not
+    materially move the terrain sample.
+    """
+    try:
+        row, col = src.index(lon, lat)
+    except Exception:
+        return None
+    if row < 0 or col < 0 or row >= src.height or col >= src.width:
+        return None
+
+    value = float(src.read(1, window=((row, row + 1), (col, col + 1)))[0, 0])
+    if _is_valid_value(src, value):
+        return value
+
+    for radius in range(1, radius_px + 1):
+        r0 = max(0, row - radius)
+        r1 = min(src.height, row + radius + 1)
+        c0 = max(0, col - radius)
+        c1 = min(src.width, col + radius + 1)
+        block = src.read(1, window=((r0, r1), (c0, c1)), masked=False)
+        candidates: list[tuple[int, float]] = []
+        for rr in range(block.shape[0]):
+            for cc in range(block.shape[1]):
+                v = float(block[rr, cc])
+                if not _is_valid_value(src, v):
+                    continue
+                dr = (r0 + rr) - row
+                dc = (c0 + cc) - col
+                candidates.append((dr * dr + dc * dc, v))
+        if candidates:
+            candidates.sort(key=lambda item: item[0])
+            return candidates[0][1]
+    return None
 
 
 def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) -> dict:
     """Return required antenna AGL for a target FCC-style HAAT.
 
     Terrain is averaged from 2 to 10 miles along eight radials spaced 45 degrees.
+    Isolated DEM nodata pixels are skipped or replaced by a nearby valid pixel;
+    a radial must still retain at least 70 percent of its nominal samples.
     """
     import rasterio
 
@@ -46,34 +101,51 @@ def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) 
         FCC_INNER_KM + (FCC_OUTER_KM - FCC_INNER_KM) * i / (SAMPLES_PER_RADIAL - 1)
         for i in range(SAMPLES_PER_RADIAL)
     ]
-    points = [(lat, lon)]
+    radial_points: list[list[tuple[float, float]]] = []
+    all_points = [(lat, lon)]
     for radial in range(RADIALS):
         bearing = radial * 45.0
-        points.extend(_destination(lat, lon, bearing, d) for d in distances)
+        pts = [_destination(lat, lon, bearing, d) for d in distances]
+        radial_points.append(pts)
+        all_points.extend(pts)
 
     dem_cache.mkdir(parents=True, exist_ok=True)
-    tile_paths = {}
-    for plat, plon in points:
+    tile_paths: dict[tuple[int, int], Path] = {}
+    for plat, plon in all_points:
         key = _tile_for(plat, plon)
         if key not in tile_paths:
             tile_paths[key] = _download_tile(key[0], key[1], dem_cache)
 
-    def sample(point: tuple[float, float]) -> float:
-        plat, plon = point
-        path = tile_paths[_tile_for(plat, plon)]
-        with rasterio.open(path) as src:
-            value = float(next(src.sample([(plon, plat)]))[0])
-            if src.nodata is not None and abs(value - float(src.nodata)) < 1e-6:
-                raise RuntimeError(f"DEM returned nodata near {plat:.5f}, {plon:.5f}.")
-            return value
+    with ExitStack() as stack:
+        datasets = {
+            key: stack.enter_context(rasterio.open(path))
+            for key, path in tile_paths.items()
+        }
 
-    site_elev = sample((lat, lon))
-    radial_means = []
-    offset = 1
-    for _ in range(RADIALS):
-        vals = [sample(p) for p in points[offset:offset + SAMPLES_PER_RADIAL]]
-        radial_means.append(sum(vals) / len(vals))
-        offset += SAMPLES_PER_RADIAL
+        def sample(point: tuple[float, float]) -> float | None:
+            plat, plon = point
+            src = datasets[_tile_for(plat, plon)]
+            return _sample_with_nearby_fallback(src, plon, plat)
+
+        site_elev = sample((lat, lon))
+        if site_elev is None:
+            raise RuntimeError(
+                f"No valid 3DEP terrain was found at or immediately around the site "
+                f"({lat:.5f}, {lon:.5f})."
+            )
+
+        radial_means: list[float] = []
+        radial_valid_counts: list[int] = []
+        for radial_index, pts in enumerate(radial_points):
+            vals = [value for value in (sample(p) for p in pts) if value is not None]
+            radial_valid_counts.append(len(vals))
+            if len(vals) < MIN_VALID_SAMPLES_PER_RADIAL:
+                bearing = radial_index * 45
+                raise RuntimeError(
+                    f"Insufficient valid 3DEP terrain on the {bearing}° radial: "
+                    f"{len(vals)}/{SAMPLES_PER_RADIAL} samples usable."
+                )
+            radial_means.append(sum(vals) / len(vals))
 
     average_terrain = sum(radial_means) / len(radial_means)
     required_amsl = target_haat_m + average_terrain
@@ -85,5 +157,6 @@ def reverse_haat(lat: float, lon: float, target_haat_m: float, dem_cache: Path) 
         "required_antenna_amsl_m": required_amsl,
         "required_antenna_agl_m": required_agl,
         "radial_means_m": radial_means,
-        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site",
+        "radial_valid_samples": radial_valid_counts,
+        "method": "8 radials, 45-degree spacing, terrain sampled 2-10 miles from site; isolated 3DEP nodata tolerated",
     }
