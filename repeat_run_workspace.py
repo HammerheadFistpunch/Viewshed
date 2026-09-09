@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import viewshed_core
 from area_scope_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from dem_cache_v2 import prepare_dem as prepare_v2_dem
+
+
+# Install the V2 DEM-cache policy at import time so it also applies in the
+# spawned worker process, where the Tk workspace itself is never constructed.
+viewshed_core.prepare_usgs_dem = prepare_v2_dem
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
