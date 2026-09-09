@@ -153,18 +153,27 @@ def _memory_budget(resources: SystemResources, user_limit_gb: float) -> int:
     total = max(resources.total_ram_bytes, 1)
     available = max(resources.available_ram_bytes, 1)
     system_reserve = max(2 * GIB, int(total * 0.20))
-    safe_available = max(int(0.5 * GIB), min(int(available * 0.75), available - min(system_reserve, int(available * 0.60))))
+    safe_available = max(
+        int(0.5 * GIB),
+        min(int(available * 0.75), available - min(system_reserve, int(available * 0.60))),
+    )
     if user_limit_gb > 0:
+        # A user ceiling is still given 25% internal headroom for transient arrays.
         safe_available = min(safe_available, int(user_limit_gb * GIB * 0.75))
     return max(int(0.5 * GIB), safe_available)
 
 
-def _estimate_memory(analysis_px: int, worker_px: int, workers: int) -> int:
-    # Conservative empirical planning model: regional raster plus rasterio/numpy
-    # working copies, then several float arrays per child process.
+def _memory_parts(analysis_px: int, worker_px: int) -> tuple[int, int]:
+    # Conservative planning model: regional raster plus rasterio/numpy working
+    # copies, then several float arrays and overhead per child process.
     regional = int(analysis_px * analysis_px * 4 * 2.5) + int(0.5 * GIB)
     per_worker = int(worker_px * worker_px * 4 * 4.5) + int(0.125 * GIB)
-    return regional + max(1, workers) * per_worker
+    return regional, per_worker
+
+
+def _estimate_memory(analysis_px: int, worker_px: int, workers: int) -> int:
+    regional, per_worker = _memory_parts(analysis_px, worker_px)
+    return regional + max(0, workers) * per_worker
 
 
 def _dimensions_for_detail(regional_m: float, worker_m: float, detail_m: float) -> tuple[int, int]:
@@ -203,14 +212,12 @@ def plan_resources(
 
     while True:
         analysis_px, worker_px = _dimensions_for_detail(regional_m, worker_m, detail)
-        regional_mem = _estimate_memory(analysis_px, worker_px, 0)
-        per_worker_mem = max(1, _estimate_memory(analysis_px, worker_px, 1) - regional_mem)
+        regional_mem, per_worker_mem = _memory_parts(analysis_px, worker_px)
         worker_budget = max(0, budget - regional_mem)
-        memory_workers = int(worker_budget // per_worker_mem)
+        memory_workers = int(worker_budget // max(1, per_worker_mem))
 
-        # Max preserves requested/native detail until even one worker cannot fit.
-        # Other modes may also retain their target if at least one safe worker fits;
-        # their coarser target naturally permits greater parallelism.
+        # Max keeps the finest requested/native detail and gives up parallelism
+        # first. Resolution is reduced only when even one worker cannot fit.
         if memory_workers >= 1:
             workers = max(1, min(cpu_target, memory_workers, station_count))
             break
