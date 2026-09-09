@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from station_data_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _FeatureWorkspace
+from tooltips import add_tooltip
 from viewshed_core import Region, prepare_job
 from workspace_tuning import (
     CUSTOM_OPERATIONAL_RESERVE_DB,
@@ -18,6 +19,81 @@ from workspace_tuning import (
 class ViewshedWorkspace(_FeatureWorkspace):
     """Keep presentation controls in Output and Custom power input in watts."""
 
+    TOOLTIP_TEXT = {
+        "Operational path-loss cap (dB)": (
+            "The maximum modeled signal loss Signal Peak will treat as usable coverage. "
+            "Lower values make the prediction more conservative; higher values extend coverage farther."
+        ),
+        "TX power (dBm)": (
+            "Transmitter output power expressed in dBm. You can use the watts option below if watts are more familiar."
+        ),
+        "TX power (W)": "Transmitter output power in watts. Signal Peak converts this to dBm internally.",
+        "TX antenna gain (dBd)": (
+            "How much the transmitting antenna concentrates signal compared with a half-wave dipole. "
+            "Higher gain increases the link budget."
+        ),
+        "RX sensitivity (dBm)": (
+            "The weakest signal the assumed receiver can decode under good conditions. "
+            "More-negative numbers mean a more sensitive receiver."
+        ),
+        "RX antenna gain (dBd)": (
+            "Gain of the receiving antenna compared with a half-wave dipole. "
+            "This represents the mobile or receiving-side antenna in the link budget."
+        ),
+        "Digipeater antenna AGL (m)": (
+            "Default digipeater antenna height above the local ground when a station-specific height is not known."
+        ),
+        "iGate antenna AGL (m)": (
+            "Default iGate antenna height above the local ground when a station-specific height is not known."
+        ),
+        "Receiver / observer height (m)": (
+            "Height of the receiving/mobile antenna above local ground. This is the other end of each modeled radio path."
+        ),
+        "Frequency (MHz)": (
+            "Radio frequency used by the propagation model. APRS in North America normally uses 144.390 MHz."
+        ),
+        "Radials per station": (
+            "Number of directions calculated outward from each station. More radials improve angular detail but take longer to compute."
+        ),
+        "Worker DEM max dimension (px)": (
+            "Limits the terrain grid size used by a worker. Larger values preserve more terrain detail but use more memory."
+        ),
+        "ITM climate code (1–7)": (
+            "Longley-Rice climate category used by the propagation model. The default represents the reference profile; change it only for a specific modeling reason."
+        ),
+        "Surface refractivity N-units": (
+            "How strongly the atmosphere bends VHF radio waves near the surface. This is an ITM environmental input."
+        ),
+        "Ground conductivity (S/m)": (
+            "How well the ground conducts radio energy. It affects modeled propagation, especially interactions with the terrain surface."
+        ),
+        "Relative permittivity": (
+            "Electrical property of the ground used by ITM. Higher values mean the ground behaves more strongly as a dielectric."
+        ),
+        "Polarization (0=H, 1=V)": (
+            "Antenna polarization used by ITM: 0 is horizontal and 1 is vertical. APRS mobile and infrastructure antennas are normally vertical."
+        ),
+        "Heatmap band size (dB)": (
+            "Width of each color step in the coverage heatmap. Smaller values show finer changes in link margin."
+        ),
+        "Maximum displayed margin (dB)": (
+            "Top of the heatmap color scale. Margin above this value is still good coverage; it is simply shown with the strongest color."
+        ),
+        "Overlay / inverse opacity (%)": (
+            "How solid the coverage and inverse overlays appear. Lower values reveal more of the base map underneath."
+        ),
+        "Per-station display floor (dB)": (
+            "Lowest link margin that will be drawn. Zero shows only coverage at or above the operational edge; a negative value also shows marginal predicted coverage."
+        ),
+        "Latitude": "North/south position of the custom station.",
+        "Longitude": "East/west position of the custom station.",
+        "Coverage radius (km)": (
+            "Maximum distance from the custom station that Signal Peak will calculate. This limits the search area; it does not guarantee coverage to that distance."
+        ),
+        "Antenna height AGL (m)": "Height of the custom station antenna above the ground at the site.",
+        "TX power (W)": "Transmitter output power in watts. Signal Peak converts this to dBm internally.",
+    }
+
     def __init__(self, master, app) -> None:
         super().__init__(master, app)
         # Watts are the more familiar operator-facing unit. If the user has not
@@ -27,6 +103,37 @@ class ViewshedWorkspace(_FeatureWorkspace):
             self.advanced_power_watts.set(True)
             self._advanced_power_unit_changed()
         self._hide_output_fields_from_advanced()
+        self._install_plain_language_tooltips()
+
+    def _install_plain_language_tooltips(self) -> None:
+        """Attach plain-language hover help to labels and their input controls."""
+        def visit(widget) -> None:
+            for child in widget.winfo_children():
+                try:
+                    text = child.cget("text")
+                except Exception:
+                    text = None
+                help_text = self.TOOLTIP_TEXT.get(str(text)) if text else None
+                if help_text:
+                    add_tooltip(child, help_text)
+                    try:
+                        info = child.grid_info()
+                        row = int(info.get("row", -1))
+                        parent = child.master
+                        for sibling in parent.winfo_children():
+                            if sibling is child:
+                                continue
+                            try:
+                                sibling_info = sibling.grid_info()
+                                if int(sibling_info.get("row", -2)) == row:
+                                    add_tooltip(sibling, help_text)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                visit(child)
+
+        visit(self)
 
     def _hide_output_fields_from_advanced(self) -> None:
         """Keep display-only margin controls exclusively on the Output tab."""
