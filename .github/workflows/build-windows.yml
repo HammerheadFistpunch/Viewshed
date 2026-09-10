@@ -2,7 +2,7 @@ name: Build Signal Peak Windows executable
 
 on:
   push:
-    branches: [main, CONUS]
+    branches: [main, CONUS, "2.1"]
   workflow_dispatch:
 
 permissions:
@@ -45,6 +45,6 @@ jobs:
       - name: Upload SignalPeak.exe
         uses: actions/upload-artifact@v4
         with:
-          name: Signal-Peak-Windows-2.0.0
+          name: Signal-Peak-Windows-2.1
           path: dist/SignalPeak.exe
           if-no-files-found: error
