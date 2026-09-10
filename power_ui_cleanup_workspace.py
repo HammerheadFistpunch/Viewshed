@@ -8,12 +8,7 @@ from tkinter import messagebox, ttk
 from station_data_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _FeatureWorkspace
 from tooltips import add_tooltip
 from viewshed_core import Region, prepare_job
-from workspace_tuning import (
-    CUSTOM_OPERATIONAL_RESERVE_DB,
-    GAP_FILL_FACTOR,
-    REFERENCE_RADIALS,
-    ViewshedWorkspace as _TunedWorkspace,
-)
+from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 
 
 class ViewshedWorkspace(_FeatureWorkspace):
@@ -91,14 +86,10 @@ class ViewshedWorkspace(_FeatureWorkspace):
             "Maximum distance from the custom station that Signal Peak will calculate. This limits the search area; it does not guarantee coverage to that distance."
         ),
         "Antenna height AGL (m)": "Height of the custom station antenna above the ground at the site.",
-        "TX power (W)": "Transmitter output power in watts. Signal Peak converts this to dBm internally.",
     }
 
     def __init__(self, master, app) -> None:
         super().__init__(master, app)
-        # Watts are the more familiar operator-facing unit. If the user has not
-        # explicitly saved a preference yet, make Advanced start in watts while
-        # preserving dBm internally for the propagation engine.
         if "advanced_power_watts" not in self._ui_prefs:
             self.advanced_power_watts.set(True)
             self._advanced_power_unit_changed()
@@ -175,8 +166,8 @@ class ViewshedWorkspace(_FeatureWorkspace):
         visit(advanced_tab)
 
     def _build_custom(self) -> None:
-        # Use the established Custom/future-station UI: TX power is entered in W.
-        # Keep compatibility aliases used elsewhere in the workspace chain.
+        # Keep the established Custom/future-station UI while using the shared
+        # Advanced propagation profile at run time.
         _TunedWorkspace._build_custom(self)
         self.custom_power_value = self.custom_power_w
         self.custom_power_dbm_mode = tk.BooleanVar(value=False)
@@ -201,6 +192,8 @@ class ViewshedWorkspace(_FeatureWorkspace):
                 raise ValueError("Antenna height must be positive.")
             if power_w <= 0:
                 raise ValueError("TX power in watts must be positive.")
+            if not -20 <= gain <= 30:
+                raise ValueError("TX antenna gain must be between -20 and 30 dBd.")
             if not 20 <= freq <= 1000:
                 raise ValueError("Frequency must be between 20 and 1000 MHz.")
 
@@ -208,7 +201,6 @@ class ViewshedWorkspace(_FeatureWorkspace):
             if tx_dbm > 80:
                 raise ValueError("TX power exceeds the supported 80 dBm maximum.")
 
-            path_budget = tx_dbm + 119.0 + gain + 2.0 - CUSTOM_OPERATIONAL_RESERVE_DB
             record = {
                 "callsign": "CUSTOM",
                 "type": "digi",
@@ -217,19 +209,19 @@ class ViewshedWorkspace(_FeatureWorkspace):
                 "_source": "reviewed_override",
                 "lasttime": 0,
             }
-            radio = {
-                "freq_mhz": freq,
-                "antenna_height_digi_m": height,
-                "tx_power_dbm": tx_dbm,
-                "tx_antenna_gain_dbd": gain,
-                "max_path_loss_db": path_budget,
-                "margin_display_floor_db": float(self._advanced_vars["margin_display_floor_db"].get()),
-                "max_margin_db": float(self._advanced_vars["max_margin_db"].get()),
-                "network_heatmap_band_db": float(self.heatmap_band_db.get()),
-                "overlay_alpha": int(round(255.0 * float(self.overlay_opacity_pct.get()) / 100.0)),
-                "n_radials": REFERENCE_RADIALS,
-                "gap_fill_factor": GAP_FILL_FACTOR,
-            }
+
+            # Start with the same validated propagation profile used by Area and
+            # Station. Override only the proposed transmitter/site parameters.
+            radio = self._advanced_settings(persist=True)
+            radio.update(
+                {
+                    "freq_mhz": freq,
+                    "antenna_height_digi_m": height,
+                    "tx_power_dbm": tx_dbm,
+                    "tx_antenna_gain_dbd": gain,
+                }
+            )
+
             _, job_file = prepare_job(
                 Region(lat, lon, radius),
                 Path(self.app.source_var.get()),
