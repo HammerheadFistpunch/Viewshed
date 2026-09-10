@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import viewshed_core
-from area_scope_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from correction_status_workspace import ViewshedWorkspace as _ViewshedWorkspace
 from dem_cache_v2 import prepare_dem as prepare_v2_dem
 
 

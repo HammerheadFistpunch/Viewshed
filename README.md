@@ -1,26 +1,21 @@
-# Signal Peak 2.0.0
+# Signal Peak 2.1.0
 
 **Signal Peak** is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes use the same terrain-profile, Longley-Rice/ITM, path-loss, and link-margin foundation.
 
-Version 2.0.0 adds resource-aware terrain-detail planning, automatic worker limits based on available RAM/CPU, resolution-aware DEM caching, and stricter Area scoping so propagation uses only stations inside the selected Area radius. The goal is to let the operator choose the desired detail level while Signal Peak protects stability first.
+Version 2.1.0 adds a redesigned output architecture with independently selectable station pins and coverage layers, unified composite/per-station heat-map styling, positive coverage, coverage gaps, redundancy mapping, configurable colors, and more reliable Corrections behavior. It also makes the Resources model the sole user-facing controller for DEM sizing and worker planning.
 
-Version 1.2.0 added persistent per-station RF overrides, a spreadsheet-style Station Data editor, and Metric/Imperial input/display selection in Advanced.
+Version 2.0 introduced resource-aware terrain-detail planning, automatic worker limits based on available RAM/CPU, resolution-aware DEM caching, and stricter Area scoping. Version 1.2 added persistent per-station RF overrides, the Station Data editor, and Metric/Imperial input/display selection.
 
 ## License
 
 Signal Peak is free and open-source software licensed under the **GNU General Public License version 2 only (GPL-2.0-only)**. See [LICENSE](LICENSE).
 
-You may use, study, modify, and redistribute Signal Peak under the GPLv2 terms. When distributing executable builds, make the corresponding source code and license information available as required by GPLv2. Third-party libraries, map services, datasets, and APIs retain their own licenses and terms; see [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md).
-
-Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.
-
 ## Quick links
 
 - [Quick Start](docs/QUICK_START.md)
 - [User Guide](docs/USER_GUIDE.md)
-- [2.0.0 Release Notes](docs/RELEASE_NOTES_2.0.0.md)
-- [1.2.0 Release Notes](docs/RELEASE_NOTES_1.2.0.md)
-- [CONUS support](docs/CONUS.md)
+- [2.1.0 Release Notes](docs/RELEASE_NOTES_2.1.0.md)
+- [2.0.1 Release Notes](docs/RELEASE_NOTES_2.0.1.md)
 - [Propagation Model](docs/PROPAGATION_MODEL.md)
 - [Station Data](docs/STATION_DATA.md)
 - [Location Corrections](docs/LOCATION_CORRECTIONS.md)
@@ -36,57 +31,56 @@ The packaged Windows application includes the current documentation under **Help
 
 ### Area
 
-Choose an analysis region, acquire the station list, inspect/correct questionable locations, then run propagation on the reviewed station set. In 2.0.0, station acquisition may look beyond the requested Area to find relevant infrastructure, but the final propagation set is clipped back to station centers inside the selected Area radius.
+Choose an analysis region, acquire the station list, inspect/correct questionable locations, then run propagation on the reviewed station set. Acquisition may look beyond the requested Area to find relevant infrastructure, but propagation is clipped back to station centers inside the selected Area radius.
 
 ### Station
 
-Select one known digipeater or iGate and run the same propagation engine for that individual site. After an Area station search, the Station tab shows that search's station set; **Load full cached catalog** deliberately restores the cumulative cache.
+Select one known digipeater or iGate and run the same propagation engine for that individual site. After an Area search, the Station tab shows that search's station set; **Load full cached catalog** deliberately restores the cumulative cache.
 
 ### Custom
 
-Click a proposed site and supply antenna height, transmitter power in Watts, gain, frequency, and maximum calculation range.
+Click a proposed site and supply antenna height, transmitter power, gain, frequency, and maximum calculation range.
 
 ### Corrections
 
-Review reported/model coordinates, topographic context, confidence, freshness, and OpenStreetMap communications-site corroboration. Reviewed corrections change the modeled coordinate while preserving the reported coordinate and provenance.
+Reviewed coordinate corrections are stored separately from seed/cache/APRS data in `ViewshedData/station_location_overrides.json` and reapplied by callsign. The UI distinguishes saved corrections, pending review candidates, stations needing review, and uncorrected stations.
 
 ### Station Data
 
-The Station Data tab shows all currently loaded stations in a sortable table. Height, TX power, TX gain, frequency, and path-loss cap can be edited in place and saved as persistent callsign-based overrides.
-
-RF precedence is:
-
-1. saved Station Data user override;
-2. RF value already present in station JSON;
-3. Advanced/global fallback.
+The Station Data tab provides a spreadsheet-style editor for station-specific height, TX power, gain, frequency, and path-loss assumptions. Saved values are keyed by callsign and persist independently from refreshed station position data.
 
 ### Advanced
 
-Area and Station RF assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, ITM environmental parameters, and display units. TX power can be entered in **Watts or dBm**. The propagation backend remains metric and dBm internally.
+Advanced contains RF/link-budget assumptions, antenna/observer heights, frequency, ITM environmental parameters, and display units. TX power can be entered in Watts or dBm. Legacy worker DEM sizing is no longer exposed here.
 
 ### Resources
 
-Signal Peak 2.0.0 adds a dedicated **Resources** tab. Terrain detail is selected with five presets:
+The Resources tab owns terrain/detail and compute planning. Terrain detail presets are:
 
-- **Auto** — chooses a safe balanced plan from the actual run and currently available system resources.
-- **Fast** — favors lower memory use and faster completion.
-- **Standard** — balances speed and terrain detail.
-- **High** — preserves smaller terrain features at higher compute cost.
-- **Max** — prioritizes stability first and terrain resolution second. It may reduce processing to one station at a time and can be **very slow** on large jobs.
+- **Auto** — safe balanced planning from the actual run and current system resources
+- **Fast** — favors speed and lower memory use
+- **Standard** — balances speed and terrain detail
+- **High** — preserves more terrain detail at higher compute cost
+- **Max** — prioritizes stability first and terrain resolution second; may reduce processing to one worker and can be very slow
 
-An optional **Memory limit (GB)** can cap the amount of RAM Signal Peak plans around. `0` means automatic. The planner keeps RAM in reserve for Windows and other applications, then chooses a safe DEM size, analysis raster size, and parallel-worker count immediately before each run.
-
-The Resources tab also reports currently available RAM and CPU information. Worker count is automatically reduced when the requested terrain detail would otherwise exceed the safe memory budget.
+An optional **Memory limit (GB)** caps the RAM Signal Peak plans around. `0` means automatic. The planner chooses DEM resolution, analysis size, and safe worker count immediately before each run.
 
 ### Output
 
-The Output tab controls the granular network heatmap band size, maximum displayed margin, per-station display floor, and overlay/inverse opacity. The default network band size is 3 dB.
+The Output tab controls presentation independently from propagation math. Current layers include:
 
-## Terrain cache behavior in 2.0.0
+- Station pins / metadata
+- Composite heat map
+- Positive coverage
+- Coverage gaps
+- Coverage redundancy
+- Per-station heat maps
 
-DEM cache entries are resolution-aware. A cached terrain product is reused only when it satisfies the requested terrain resolution. Raising the detail preset can therefore trigger a higher-resolution terrain download/preparation instead of silently reusing a coarser cached DEM.
+Output presets are **Standard**, **Coverage Analysis**, **Station Analysis**, **Everything**, and **Custom**. Composite and per-station heat maps share the same configurable stepped link-margin palette. Positive, gap, and redundancy colors are also configurable.
 
-Lower-detail runs may reuse an existing cache product when that product already meets or exceeds the requested resolution.
+## Terrain cache behavior
+
+DEM cache entries are resolution-aware. Cached terrain is reused only when it satisfies the requested detail. A higher-detail run can therefore trigger higher-resolution terrain preparation instead of silently reusing a coarser cache product.
 
 ## Reference profile
 
@@ -102,19 +96,7 @@ Current Area/Station fallback assumptions include:
 - iGate antenna height: 3 m AGL
 - Observer/receiver height: 2 m AGL
 
-These are fallback modeling assumptions, not measured installation data. Known station-specific RF values can override the fallback per station.
-
-## Network heatmap and inverse coverage
-
-For Area runs, Signal Peak combines successfully modeled per-station margin rasters into a **best remaining link margin** surface. Each cell represents the strongest modeled remaining margin available from any included station.
-
-The **Inverse Coverage — APRS Not Expected** layer identifies cells inside the requested analysis region where no modeled station has positive remaining link margin. It is a threshold/dead-zone product, not a measurement of how many dB below threshold a location is.
-
-## Station acquisition
-
-Normal Area discovery can use receive-only APRS-IS sampling, then merge cache and optional seed/fallback records. A built-in **Build Seed…** tool performs longer APRS collection and saves reusable JSON under `ViewshedData/seeds/`.
-
-An aprs.fi API key is optional and is treated as **session-only** rather than persisted in application settings.
+These are fallback modeling assumptions, not measured installation data. Known station-specific RF values can override them.
 
 ## Outputs
 
@@ -143,15 +125,13 @@ python -m pip install -r requirements-build.txt
 pyinstaller --clean --noconfirm viewshed.spec
 ```
 
-The resulting executable is `dist/SignalPeak.exe`.
-
-A packaged smoke test is available:
+The resulting executable is `dist/SignalPeak.exe`. A packaged smoke test is available with:
 
 ```bash
 SignalPeak.exe --self-test
 ```
 
-GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Signal-Peak-Windows-2.0.0` artifact.
+GitHub Actions builds and smoke-tests the Windows executable and uploads the `Signal-Peak-Windows-2.1.0` artifact for the 2.1 development branch.
 
 ## Modeling caution
 

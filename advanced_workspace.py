@@ -111,7 +111,6 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             ("Radials per station", "n_radials"),
             ("Displayed margin floor (dB)", "margin_display_floor_db"),
             ("Maximum displayed margin (dB)", "max_margin_db"),
-            ("Worker DEM max dimension (px)", "worker_dem_max_px"),
             ("ITM climate code (1–7)", "itm_climate"),
             ("Surface refractivity N-units", "itm_ens"),
             ("Ground conductivity (S/m)", "itm_sgm"),

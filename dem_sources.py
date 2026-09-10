@@ -62,28 +62,73 @@ def _download_url(requests, url: str, target: Path, timeout: int = 120) -> None:
 
 
 def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
+    """Return authoritative TNM 1-arc-second products for one 1-degree tile.
+
+    The staged S3 ``current`` path is not guaranteed to contain the legacy
+    unsuffixed filename. TNMAccess is the authoritative product index and may
+    return either the current product or a dated historical product when the
+    current staging record is temporarily absent.  Both are valid 3DEP
+    seamless 1-arc-second DEMs for viewshed work.
+    """
     south = lat_north - 1
     west = -float(lon_west)
     east = west + 1.0
     bbox = f"{west},{south},{east},{lat_north}"
     urls: list[str] = []
 
-    for dataset in ("3DEP 1 arc-second", "National Elevation Dataset (NED) 1 arc-second"):
-        response = requests.get(
-            USGS_TNM_API,
-            params={"datasets": dataset, "bbox": bbox, "prodFormats": "GeoTIFF,TIFF"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
+    # This is the current TNM dataset tag. The older "3DEP 1 arc-second"
+    # label is not consistently accepted by TNMAccess and can return no items.
+    datasets = (
+        "National Elevation Dataset (NED) 1 arc-second Current",
+        "National Elevation Dataset (NED) 1 arc-second",
+    )
+    for dataset in datasets:
+        try:
+            response = requests.get(
+                USGS_TNM_API,
+                params={
+                    "datasets": dataset,
+                    "bbox": bbox,
+                    "prodExtents": "1 x 1 degree",
+                    "prodFormats": "GeoTIFF,TIFF",
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            continue
+
         for item in data.get("items", []):
             url = item.get("downloadURL")
-            if url and url not in urls:
+            if not url or url in urls:
+                continue
+            # Only accept the requested 1-degree 1-arc-second GeoTIFF family.
+            # TNM may return multiple products intersecting the bbox.
+            name = url.rsplit("/", 1)[-1].lower()
+            tile = f"n{south:02d}w{lon_west:03d}"
+            if tile in name and name.endswith((".tif", ".tiff", ".zip")):
                 urls.append(url)
+
         if urls:
             break
 
-    return sorted(urls, key=lambda u: ("/current/" not in u.lower(), "/historical/" in u.lower()))
+    # Prefer current products, then dated historical products. Within each
+    # group, newer dated products sort first so a stale historical tile is only
+    # used when no newer product is available.
+    def _candidate_key(url: str):
+        lower = url.lower()
+        is_current = "/current/" in lower
+        filename = url.rsplit("/", 1)[-1]
+        date_suffix = ""
+        stem = filename.rsplit(".", 1)[0]
+        if "_" in stem:
+            maybe_date = stem.rsplit("_", 1)[-1]
+            if len(maybe_date) == 8 and maybe_date.isdigit():
+                date_suffix = maybe_date
+        return (not is_current, date_suffix == "", date_suffix)
+
+    return sorted(urls, key=_candidate_key, reverse=False)
 
 
 def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
@@ -107,6 +152,11 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
             return target
         except Exception as exc:
             errors.append(f"current: {exc}")
+            # A 404 is deterministic: retrying the same missing object wastes
+            # time and delays the TNM product lookup. Other failures may be
+            # transient, so retain the short retry behavior for those.
+            if "404 Client Error" in str(exc):
+                break
             if attempt < 3:
                 time.sleep(1.5 * attempt)
 

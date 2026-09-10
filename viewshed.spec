@@ -29,6 +29,8 @@ datas = [
     ("docs/RELEASE_NOTES_1.1.0.md", "docs"),
     ("docs/RELEASE_NOTES_1.2.0.md", "docs"),
     ("docs/RELEASE_NOTES_2.0.0.md", "docs"),
+    ("docs/RELEASE_NOTES_2.0.1.md", "docs"),
+    ("docs/RELEASE_NOTES_2.1.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
@@ -55,6 +57,7 @@ a = Analysis(
         "dem_cache_v2",
         "repeat_run_workspace",
         "help_workspace",
+        "correction_status_workspace",
         "conus_support",
         "conus_station_loader",
         "coverage_products",

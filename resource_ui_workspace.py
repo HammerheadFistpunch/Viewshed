@@ -15,7 +15,7 @@ from tooltips import add_tooltip
 from viewshed_core import portable_data_root
 
 
-PRODUCT_VERSION = "2.0.1"
+PRODUCT_VERSION = "2.1.0"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 _RESOURCE_PREFS = "resource_settings.json"
 _DETAIL_VALUES = ("Auto", "Fast", "Standard", "High", "Max")
@@ -46,7 +46,7 @@ def _save_resource_prefs(mode: str, memory_limit_gb: float) -> None:
 
 
 def _sync_release_identity() -> None:
-    """Keep the legacy Help/About wrapper aligned with the V2 product release."""
+    """Keep Help/About and network identity aligned with the current release."""
     viewshed_core.APP_VERSION = PRODUCT_VERSION
     station_sources.USER_AGENT = f"SignalPeak/{PRODUCT_VERSION} (+{PRODUCT_HOME})"
 
@@ -61,11 +61,15 @@ def _sync_release_identity() -> None:
     if not isinstance(docs, list):
         return
 
-    release_entry = ("2.0.1 Release Notes", "docs/RELEASE_NOTES_2.0.1.md")
+    release_entry = ("2.1.0 Release Notes", "docs/RELEASE_NOTES_2.1.0.md")
     updated = [
         entry
         for entry in docs
-        if entry[1] not in {"docs/RELEASE_NOTES_2.0.0.md", "docs/RELEASE_NOTES_2.0.1.md"}
+        if entry[1] not in {
+            "docs/RELEASE_NOTES_2.0.0.md",
+            "docs/RELEASE_NOTES_2.0.1.md",
+            "docs/RELEASE_NOTES_2.1.0.md",
+        }
     ]
     insert_at = next((i for i, entry in enumerate(updated) if entry[1] == "docs/RELEASE_NOTES_1.2.0.md"), 4)
     updated.insert(insert_at, release_entry)
