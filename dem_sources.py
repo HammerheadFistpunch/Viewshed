@@ -5,12 +5,14 @@ import json
 import math
 import time
 import zipfile
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
 USGS_TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 USGS_3DEP_CURRENT = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1/TIFF/current"
+USGS_3DEP_BUCKET = "https://prd-tnm.s3.amazonaws.com/"
 
 
 def _tile_id(lat_north: int, lon_west: int) -> str:
@@ -60,6 +62,52 @@ def _download_url(requests, url: str, target: Path, timeout: int = 120) -> None:
         part.unlink(missing_ok=True)
         raise
 
+
+
+def _s3_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
+    """Discover actual 1-degree 3DEP GeoTIFF keys from the public S3 index."""
+    south = lat_north - 1
+    tile = f"n{south:02d}w{lon_west:03d}"
+    candidates: list[str] = []
+
+    prefixes = (
+        f"StagedProducts/Elevation/1/TIFF/current/{tile}/",
+        f"StagedProducts/Elevation/1/TIFF/historical/{tile}/",
+    )
+    for prefix in prefixes:
+        try:
+            response = requests.get(
+                USGS_3DEP_BUCKET,
+                params={"list-type": "2", "prefix": prefix, "max-keys": 1000},
+                timeout=30,
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+        except Exception as exc:
+            print(f"      S3 listing failed ({prefix}): {exc}")
+            continue
+
+        for elem in root.iter():
+            if elem.tag.rsplit("}", 1)[-1] != "Key" or not elem.text:
+                continue
+            key = elem.text
+            name = key.rsplit("/", 1)[-1].lower()
+            if tile in name and name.endswith((".tif", ".tiff", ".zip")):
+                candidates.append(USGS_3DEP_BUCKET + key)
+
+    def candidate_key(url: str):
+        lower = url.lower()
+        is_current = "/current/" in lower
+        filename = url.rsplit("/", 1)[-1]
+        stem = filename.rsplit(".", 1)[0]
+        date_suffix = ""
+        if "_" in stem:
+            maybe_date = stem.rsplit("_", 1)[-1]
+            if len(maybe_date) == 8 and maybe_date.isdigit():
+                date_suffix = maybe_date
+        return (not is_current, -(int(date_suffix) if date_suffix else -1))
+
+    return sorted(set(candidates), key=candidate_key)
 
 def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     """Return authoritative TNM 1-arc-second products for one 1-degree tile.
@@ -175,11 +223,17 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
             if attempt < 3:
                 time.sleep(1.5 * attempt)
 
-    try:
-        candidates = _tnm_candidates(requests, lat_north, lon_west)
-    except Exception as exc:
-        errors.append(f"TNM lookup: {exc}")
-        candidates = []
+    # Resolve dated/current object names from S3 before using the TNM API.
+    # The canonical unsuffixed current filename can disappear when USGS
+    # republishes a 1-degree tile, while the actual object remains discoverable
+    # under the same tile prefix.
+    candidates = _s3_candidates(requests, lat_north, lon_west)
+    if not candidates:
+        try:
+            candidates = _tnm_candidates(requests, lat_north, lon_west)
+        except Exception as exc:
+            errors.append(f"TNM lookup: {exc}")
+            candidates = []
 
     for url in candidates:
         try:
