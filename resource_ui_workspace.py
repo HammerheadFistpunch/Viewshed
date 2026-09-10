@@ -15,7 +15,7 @@ from tooltips import add_tooltip
 from viewshed_core import portable_data_root
 
 
-PRODUCT_VERSION = "2.0.0"
+PRODUCT_VERSION = "2.0.1"
 PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 _RESOURCE_PREFS = "resource_settings.json"
 _DETAIL_VALUES = ("Auto", "Fast", "Standard", "High", "Max")
@@ -61,8 +61,12 @@ def _sync_release_identity() -> None:
     if not isinstance(docs, list):
         return
 
-    release_entry = ("2.0.0 Release Notes", "docs/RELEASE_NOTES_2.0.0.md")
-    updated = [entry for entry in docs if entry[1] != "docs/RELEASE_NOTES_2.0.0.md"]
+    release_entry = ("2.0.1 Release Notes", "docs/RELEASE_NOTES_2.0.1.md")
+    updated = [
+        entry
+        for entry in docs
+        if entry[1] not in {"docs/RELEASE_NOTES_2.0.0.md", "docs/RELEASE_NOTES_2.0.1.md"}
+    ]
     insert_at = next((i for i, entry in enumerate(updated) if entry[1] == "docs/RELEASE_NOTES_1.2.0.md"), 4)
     updated.insert(insert_at, release_entry)
     workspace.DOCS = updated
