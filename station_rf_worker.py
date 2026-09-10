@@ -36,6 +36,33 @@ def _station_cfg(station: dict, cfg: dict) -> dict:
     return merged
 
 
+def _resolve_max_path_loss(cfg: dict) -> float:
+    """Resolve link budget uniformly, then apply the shared operational reserve."""
+    tx_pwr = float(cfg.get("tx_power_dbm", 0.0))
+    tx_ant = float(cfg.get("tx_antenna_gain_dbd", 0.0))
+    rx_sens = float(cfg.get("rx_sensitivity_dbm", 0.0))
+    rx_ant = float(cfg.get("rx_antenna_gain_dbd", 0.0))
+    cap = float(cfg.get("max_path_loss_db", 110.0))
+    reserve = float(cfg.get("operational_reserve_db", 0.0))
+
+    if tx_pwr or tx_ant or rx_sens or rx_ant:
+        raw_budget = tx_pwr + abs(rx_sens) + tx_ant + rx_ant
+        capped_budget = min(raw_budget, cap)
+        effective = capped_budget - reserve
+        print(
+            f"   Link budget: raw {raw_budget:.1f} dB; cap {cap:.1f} dB; "
+            f"operational reserve {reserve:.1f} dB -> effective {effective:.1f} dB"
+        )
+        return effective
+
+    effective = cap - reserve
+    print(
+        f"   Max path loss: cap {cap:.1f} dB; operational reserve {reserve:.1f} dB "
+        f"-> effective {effective:.1f} dB"
+    )
+    return effective
+
+
 def process_station(args: tuple):
     import aprs_viewshed_utah_parallel as engine
 
@@ -52,4 +79,5 @@ def install(engine) -> None:
         return
     engine._station_rf_base_process_station = engine._process_station
     engine._process_station = process_station
+    engine._resolve_max_path_loss = _resolve_max_path_loss
     engine._station_rf_override_installed = True
