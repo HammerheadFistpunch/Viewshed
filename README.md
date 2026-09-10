@@ -21,6 +21,7 @@ Signal Peak is free and open-source software licensed under the **GNU General Pu
 - [Location Corrections](docs/LOCATION_CORRECTIONS.md)
 - [Outputs](docs/OUTPUTS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [DEM Bulk Downloader](docs/DEM_BULK_DOWNLOADER.md)
 - [Dependencies / Licenses](docs/LICENSES_AND_DEPENDENCIES.md)
 - [Special Considerations](docs/SPECIAL_CONSIDERATIONS.md)
 - [Roadmap](docs/ROADMAP.md)
@@ -81,6 +82,8 @@ Output presets are **Standard**, **Coverage Analysis**, **Station Analysis**, **
 ## Terrain cache behavior
 
 DEM cache entries are resolution-aware. Cached terrain is reused only when it satisfies the requested detail. A higher-detail run can therefore trigger higher-resolution terrain preparation instead of silently reusing a coarser cache product.
+
+For offline disaster recovery or long-term reproducibility, `dem_bulk_downloader.py` can build a separate frozen USGS 3DEP archive. See [DEM Bulk Downloader](docs/DEM_BULK_DOWNLOADER.md).
 
 ## Reference profile
 
