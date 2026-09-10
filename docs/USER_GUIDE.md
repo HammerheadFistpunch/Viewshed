@@ -4,7 +4,7 @@
 
 Signal Peak is a map-first VHF/APRS propagation-analysis application. Area, Station, and Custom modes use the same terrain/ITM/link-margin foundation; the difference is how the site and radio inputs are selected.
 
-Version 1.2.0 adds persistent per-station RF overrides, a spreadsheet-style Station Data editor, and Metric/Imperial input/display selection in Advanced. The propagation backend continues to use metric units and dBm internally.
+Version 2.0.0 adds resource-aware terrain-detail presets, live RAM/CPU visibility, dynamic parallel-worker limits, resolution-aware DEM caching, and stricter Area scoping. Version 1.2.0 introduced persistent per-station RF overrides, the Station Data editor, and Metric/Imperial input/display selection.
 
 ## Shared APRS / data settings
 
@@ -26,10 +26,42 @@ Area mode is the normal regional workflow.
 4. Click **Find stations**.
 5. Inspect the station set and review location concerns.
 6. Review **Station Data** if you have known per-station RF values.
-7. Configure Advanced and Output settings if needed.
+7. Configure Resources, Advanced, and Output settings if needed.
 8. Click **Run area propagation**.
 
-Finding stations is intentionally separate from RF math. The reviewed station set is frozen for the propagation job.
+Station acquisition may inspect infrastructure outside the Area radius so nearby stations can be discovered reliably. Before propagation, Signal Peak 2.0.0 clips the acquired station set back to station centers inside the selected Area radius. This prevents a seed file or wide acquisition search from expanding the modeled Area beyond what the operator selected.
+
+## Resources mode
+
+The **Resources** tab controls terrain-detail/resource planning without changing the RF assumptions themselves.
+
+### Terrain detail presets
+
+- **Auto** — selects a safe balanced plan from the actual station set, requested range, and currently available system resources.
+- **Fast** — favors faster execution and lower memory use.
+- **Standard** — balances speed and terrain detail.
+- **High** — increases terrain detail and preserves smaller terrain features at a higher memory/compute cost.
+- **Max** — prioritizes stability first and terrain resolution second. Signal Peak may reduce parallel processing to a single station at a time. Large Max runs can be **very slow**.
+
+The selected preset is translated immediately before a propagation run into concrete values for terrain resolution, DEM dimensions, analysis raster dimensions, and safe worker count.
+
+### Memory limit
+
+**Memory limit (GB)** is an optional ceiling for planning. `0` means automatic.
+
+Signal Peak reads currently available RAM, keeps a reserve for Windows and other applications, and then determines how many worker processes can run without exceeding the safe budget. A user-supplied memory limit can further reduce that budget. The limit is a planning ceiling; Signal Peak does not intentionally allocate the full amount.
+
+### CPU and worker planning
+
+The Resources tab reports logical CPUs, physical cores when available, and current CPU load when the operating system exposes it. CPU count establishes an upper bound, while memory safety can reduce the actual parallel-worker count below that bound.
+
+This means higher-detail presets do not simply increase worker count or force a fixed raster size. The planner may trade parallelism for terrain resolution to remain stable.
+
+## Resolution-aware DEM cache
+
+Signal Peak 2.0.0 records terrain cache information with the detail/resolution needed to determine whether a cached DEM is suitable for a later run.
+
+A cached terrain product is reused when it meets or exceeds the requested resolution. If a later run asks for finer terrain detail than the cache provides, Signal Peak prepares/downloads a higher-resolution terrain product instead of silently reusing the coarser one.
 
 ## Station mode
 
@@ -57,19 +89,7 @@ The default queue shows stations needing attention and sorts lower-confidence en
 
 ## Station Data mode
 
-The **Station Data** tab is the 1.2.0 spreadsheet-style editor for station-specific RF assumptions.
-
-The table shows the effective values each loaded station will use and can be sorted by:
-
-- callsign
-- station type (`digi` or `igate`)
-- latitude / longitude
-- antenna height AGL
-- TX power
-- TX antenna gain
-- frequency
-- path-loss cap
-- RF source
+The **Station Data** tab is the spreadsheet-style editor for station-specific RF assumptions.
 
 Double-click height, power, gain, frequency, or path-loss cells to edit them. Use **Save edits** to persist changes. Use **Clear selected overrides** to return selected stations to their station-JSON value or Advanced fallback.
 
@@ -85,20 +105,16 @@ Effective RF precedence is:
 
 Advanced settings apply to Area and Station runs and persist in `ViewshedData/advanced_settings.json`.
 
-Radio/link settings include operational path-loss cap, TX power, TX/RX antenna gain, RX sensitivity, antenna heights, observer height, and frequency. **TX power can be entered in Watts or dBm.** Signal Peak converts Watts to dBm before link-budget calculation.
-
-Propagation/compute settings include radial count, worker DEM maximum dimension, ITM climate, surface refractivity, ground conductivity, relative permittivity, and polarization.
+Radio/link settings include operational path-loss cap, TX power, TX/RX antenna gain, RX sensitivity, antenna heights, observer height, frequency, and ITM environmental assumptions. **TX power can be entered in Watts or dBm.** Signal Peak converts Watts to dBm before link-budget calculation.
 
 ### Metric / Imperial input mode
 
-The Advanced tab also contains the application input-unit selector:
+The Advanced tab contains the application input-unit selector:
 
 - **Metric (km / m)**
 - **Imperial (mi / ft)**
 
 Changing this setting converts distance and height fields in the operator UI. It does not switch the propagation engine into an imperial backend. Jobs are converted back to metric before propagation, and link-budget power remains dBm internally.
-
-Use **Reset to Viewshed defaults** to restore the reference propagation profile. Unit preference is a separate UI preference and is not part of the propagation physics.
 
 ## Output mode
 
@@ -109,31 +125,25 @@ The **Output** tab controls how the modeled result is presented without changing
 - **Overlay / inverse opacity (%)** — transparency of network and inverse overlays.
 - **Per-station display floor (dB)** — display threshold used for individual station viewsheds.
 
-## Network heatmap
+## Network heatmap and inverse coverage
 
-The **Granular Network Margin** layer combines all successfully modeled stations. At each map cell, Signal Peak keeps the highest remaining modeled link margin available from any included station.
-
-The stepped palette progresses blue → cyan → green → yellow → orange → red as remaining margin increases. `0 dB` is the modeled operational edge.
-
-## Inverse coverage
+The **Granular Network Margin** layer keeps the highest remaining modeled link margin available from any included station at each cell. `0 dB` is the modeled operational edge.
 
 **Inverse Coverage — APRS Not Expected** marks cells inside the requested analysis region where no included station has positive modeled margin. The inverse product is binary and should not be interpreted as a negative-margin gradient.
 
 ## CONUS operation
 
-Signal Peak uses normal WGS84 station validation, selects a local UTM projection from the job location, and derives USGS 3DEP terrain requests from the actual geography. The selected UTM zone is written to the log.
+Signal Peak uses normal WGS84 station validation, selects a local UTM projection from the job location, and derives USGS 3DEP terrain requests from the actual geography. Very broad jobs spanning multiple UTM zones should still be interpreted cautiously because one projected CRS is used per job.
 
-Very broad jobs spanning multiple UTM zones should still be interpreted cautiously because one projected CRS is used per job.
-
-## Cancelling a job
+## Cancelling and repeating jobs
 
 While a propagation job is active, click **Cancel Run**. Signal Peak asks for confirmation and terminates the worker process tree. Shared DEM cache files are preserved.
+
+Completed runs can be followed immediately by another run; the workspace clears stale completion state when new Area, Station, or Custom inputs are selected.
 
 ## Completed outputs
 
 After a successful run, the header provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF**.
-
-The KMZ opens with the network best-margin heatmap visible by default. The inverse layer and individual station viewsheds remain independently toggleable.
 
 ## Help / About
 

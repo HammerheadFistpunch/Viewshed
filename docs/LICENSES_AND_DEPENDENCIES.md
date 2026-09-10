@@ -15,6 +15,9 @@ The current runtime dependency set is defined in `requirements.txt`. Major compo
 - `Pillow` — image processing
 - `requests` — HTTP access for supported external services
 - `tkintermapview` and Python/Tk — desktop map/UI support
+- `psutil` — Signal Peak V2 system RAM and CPU telemetry for safe terrain/resource planning
+
+The V2 resource planner includes a standard-library fallback for basic RAM and CPU-count detection when `psutil` is unavailable, but packaged V2 builds should include `psutil` for accurate available-memory and CPU-load reporting.
 
 Use the package metadata installed by `pip` and the upstream projects for the authoritative license text and current dependency notices.
 

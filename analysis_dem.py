@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -8,13 +9,22 @@ def prepare_analysis_dem(source_dem: Path, work_dir: Path, max_dimension: int = 
 
     The source 3DEP mosaic remains untouched. The returned raster preserves the
     same CRS and geographic bounds while reducing the longest raster dimension
-    to ``max_dimension`` so the legacy propagation engine does not require a
-    multi-gigabyte Windows shared-memory allocation.
+    to ``max_dimension`` so the propagation engine does not require an unsafe
+    shared-memory allocation. Signal Peak V2 may supply a per-run safe limit
+    through ``SIGNAL_PEAK_ANALYSIS_MAX_PX``.
     """
     import numpy as np
     import rasterio
     from rasterio.enums import Resampling
     from rasterio.transform import Affine
+
+    try:
+        planned = int(os.environ.get("SIGNAL_PEAK_ANALYSIS_MAX_PX", "0"))
+    except ValueError:
+        planned = 0
+    if planned > 0:
+        max_dimension = max(2000, min(16000, planned))
+        print(f"   V2 analysis DEM limit: {max_dimension}px")
 
     source_dem = Path(source_dem)
     work_dir = Path(work_dir)

@@ -1,10 +1,10 @@
-# Signal Peak 1.2.0
+# Signal Peak 2.0.0
 
 **Signal Peak** is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes use the same terrain-profile, Longley-Rice/ITM, path-loss, and link-margin foundation.
 
-Version 1.2.0 adds persistent per-station RF overrides, a spreadsheet-style Station Data editor, and Metric/Imperial input/display selection in Advanced. The propagation backend remains metric/dBm internally.
+Version 2.0.0 adds resource-aware terrain-detail planning, automatic worker limits based on available RAM/CPU, resolution-aware DEM caching, and stricter Area scoping so propagation uses only stations inside the selected Area radius. The goal is to let the operator choose the desired detail level while Signal Peak protects stability first.
 
-Version 1.1.0 introduced CONUS-oriented validation/projection, the network best-margin heatmap, inverse/dead-zone output, run-scoped Station lists, and configurable heatmap presentation.
+Version 1.2.0 added persistent per-station RF overrides, a spreadsheet-style Station Data editor, and Metric/Imperial input/display selection in Advanced.
 
 ## License
 
@@ -18,8 +18,8 @@ Copyright © 2026 HammerheadFistpunch and Signal Peak contributors.
 
 - [Quick Start](docs/QUICK_START.md)
 - [User Guide](docs/USER_GUIDE.md)
+- [2.0.0 Release Notes](docs/RELEASE_NOTES_2.0.0.md)
 - [1.2.0 Release Notes](docs/RELEASE_NOTES_1.2.0.md)
-- [1.1.0 Release Notes](docs/RELEASE_NOTES_1.1.0.md)
 - [CONUS support](docs/CONUS.md)
 - [Propagation Model](docs/PROPAGATION_MODEL.md)
 - [Station Data](docs/STATION_DATA.md)
@@ -36,7 +36,7 @@ The packaged Windows application includes the current documentation under **Help
 
 ### Area
 
-Choose an analysis region, acquire the station list, inspect/correct questionable locations, then run propagation on the reviewed station set. Area results include the network best-margin heatmap, inverse-coverage layer, and individual station viewsheds.
+Choose an analysis region, acquire the station list, inspect/correct questionable locations, then run propagation on the reviewed station set. In 2.0.0, station acquisition may look beyond the requested Area to find relevant infrastructure, but the final propagation set is clipped back to station centers inside the selected Area radius.
 
 ### Station
 
@@ -60,26 +60,37 @@ RF precedence is:
 2. RF value already present in station JSON;
 3. Advanced/global fallback.
 
-Saved RF overrides are stored separately from APRS/cache position data, so normal station refreshes do not erase manually curated RF values.
-
 ### Advanced
 
-Area and Station assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, radial count, DEM resolution, and ITM environmental parameters. TX power can be entered in **Watts or dBm**.
+Area and Station RF assumptions can be changed and persisted, including link-budget assumptions, antenna/observer heights, frequency, ITM environmental parameters, and display units. TX power can be entered in **Watts or dBm**. The propagation backend remains metric and dBm internally.
 
-Advanced also contains the **Metric / Imperial** selector. It changes how distance and height fields are entered and displayed:
+### Resources
 
-- Metric: km / m
-- Imperial: mi / ft
+Signal Peak 2.0.0 adds a dedicated **Resources** tab. Terrain detail is selected with five presets:
 
-Signal Peak converts operator-facing values before creating the propagation job. Internal propagation math remains metric and dBm-based.
+- **Auto** — chooses a safe balanced plan from the actual run and currently available system resources.
+- **Fast** — favors lower memory use and faster completion.
+- **Standard** — balances speed and terrain detail.
+- **High** — preserves smaller terrain features at higher compute cost.
+- **Max** — prioritizes stability first and terrain resolution second. It may reduce processing to one station at a time and can be **very slow** on large jobs.
+
+An optional **Memory limit (GB)** can cap the amount of RAM Signal Peak plans around. `0` means automatic. The planner keeps RAM in reserve for Windows and other applications, then chooses a safe DEM size, analysis raster size, and parallel-worker count immediately before each run.
+
+The Resources tab also reports currently available RAM and CPU information. Worker count is automatically reduced when the requested terrain detail would otherwise exceed the safe memory budget.
 
 ### Output
 
 The Output tab controls the granular network heatmap band size, maximum displayed margin, per-station display floor, and overlay/inverse opacity. The default network band size is 3 dB.
 
+## Terrain cache behavior in 2.0.0
+
+DEM cache entries are resolution-aware. A cached terrain product is reused only when it satisfies the requested terrain resolution. Raising the detail preset can therefore trigger a higher-resolution terrain download/preparation instead of silently reusing a coarser cached DEM.
+
+Lower-detail runs may reuse an existing cache product when that product already meets or exceeds the requested resolution.
+
 ## Reference profile
 
-Current Area/Station defaults include:
+Current Area/Station fallback assumptions include:
 
 - Frequency: 144.390 MHz
 - TX power: 50 W (approximately 47 dBm)
@@ -90,24 +101,14 @@ Current Area/Station defaults include:
 - Digipeater antenna height: 20 m AGL
 - iGate antenna height: 3 m AGL
 - Observer/receiver height: 2 m AGL
-- Radials: **1080 per station**
-- Reduced lateral radial gap fill
 
-These are fallback modeling assumptions, not measured installation data. In 1.2.0, known station-specific RF values can override the fallback per station.
-
-## CONUS behavior
-
-Signal Peak chooses the projected UTM CRS from the geographic center of each job. Terrain acquisition uses USGS 3DEP data derived from the requested geography rather than a fixed Utah extent.
-
-The legacy propagation module retains an old Utah-oriented filename internally, but the active station validation and projection layers are not fixed to Utah.
+These are fallback modeling assumptions, not measured installation data. Known station-specific RF values can override the fallback per station.
 
 ## Network heatmap and inverse coverage
 
 For Area runs, Signal Peak combines successfully modeled per-station margin rasters into a **best remaining link margin** surface. Each cell represents the strongest modeled remaining margin available from any included station.
 
 The **Inverse Coverage — APRS Not Expected** layer identifies cells inside the requested analysis region where no modeled station has positive remaining link margin. It is a threshold/dead-zone product, not a measurement of how many dB below threshold a location is.
-
-Individual station overlays remain in the KMZ for inspection and can be toggled independently.
 
 ## Station acquisition
 
@@ -150,7 +151,7 @@ A packaged smoke test is available:
 SignalPeak.exe --self-test
 ```
 
-GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Signal-Peak-Windows-1.2.0` artifact.
+GitHub Actions builds and smoke-tests the Windows executable on pushes to `main` and uploads the `Signal-Peak-Windows-2.0.0` artifact.
 
 ## Modeling caution
 

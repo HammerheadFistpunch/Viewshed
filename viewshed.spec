@@ -28,6 +28,7 @@ datas = [
     ("docs/RELEASE_READINESS_1.0.0.md", "docs"),
     ("docs/RELEASE_NOTES_1.1.0.md", "docs"),
     ("docs/RELEASE_NOTES_1.2.0.md", "docs"),
+    ("docs/RELEASE_NOTES_2.0.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
@@ -48,6 +49,10 @@ a = Analysis(
         "station_rf_registry",
         "station_rf_worker",
         "power_ui_cleanup_workspace",
+        "resource_planner",
+        "resource_ui_workspace",
+        "area_scope_workspace",
+        "dem_cache_v2",
         "repeat_run_workspace",
         "help_workspace",
         "conus_support",
