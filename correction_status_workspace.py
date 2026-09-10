@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from repeat_run_workspace import ViewshedWorkspace as _ViewshedWorkspace
+from area_scope_workspace import ViewshedWorkspace as _ViewshedWorkspace
 
 
 class ViewshedWorkspace(_ViewshedWorkspace):
