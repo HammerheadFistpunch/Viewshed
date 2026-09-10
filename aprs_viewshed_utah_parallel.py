@@ -1567,8 +1567,12 @@ def build_kmz(stations: list, png_path: Path, bbox: tuple, cfg: dict,
                       flush=True)
 
     for stype, folder, arc_name, png_path in ordered_results:
-        if arc_name is not None:
-            kmz_overlays.append((arc_name, png_path))
+        if arc_name is not None and png_path is not None:
+            overlay_path = Path(png_path)
+            if overlay_path.exists():
+                kmz_overlays.append((arc_name, overlay_path))
+            else:
+                print(f"   Warning: station overlay missing; skipping {arc_name}: {overlay_path}")
         (digi_folders if stype == "digi" else igate_folders).append(folder)
 
     dc    = len(digi_folders)
@@ -1654,12 +1658,31 @@ def build_kmz(stations: list, png_path: Path, bbox: tuple, cfg: dict,
     t3 = time.perf_counter()
     print("   Writing KMZ archive...", end=" ", flush=True)
     kmz_path = work_dir.parent / cfg["output_kmz"]
+
+    # Guard the archive boundary: zipfile.write() raises an opaque TypeError
+    # when an optional renderer returns None. Prefer the known work-dir paths
+    # when available, and fail with a useful diagnostic only if the required
+    # overlay really is absent.
+    png_path = Path(png_path) if png_path is not None else work_dir / "coverage_overlay.png"
+    legend_path = Path(legend_path) if legend_path is not None else work_dir / "legend.png"
+    if not png_path.is_file():
+        raise RuntimeError(f"Required coverage overlay PNG was not created: {png_path}")
+    if not legend_path.is_file():
+        raise RuntimeError(f"Required legend PNG was not created: {legend_path}")
+
     with zipfile.ZipFile(kmz_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("doc.kml", kml)
-        zf.write(png_path,    "coverage_overlay.png")
-        zf.write(legend_path, "legend.png")
+        zf.write(str(png_path), "coverage_overlay.png")
+        zf.write(str(legend_path), "legend.png")
         for arc_name, file_path in kmz_overlays:
-            zf.write(file_path, arc_name)
+            if file_path is None:
+                print(f"   Warning: skipping optional KMZ overlay with no file: {arc_name}")
+                continue
+            file_path = Path(file_path)
+            if not file_path.is_file():
+                print(f"   Warning: skipping missing optional KMZ overlay {arc_name}: {file_path}")
+                continue
+            zf.write(str(file_path), arc_name)
     print(f"done  ({kmz_path.stat().st_size/1e6:.1f} MB, {_elapsed(t3)})")
     print(f"   ✅ KMZ written: {kmz_path}  ({_elapsed(t0)} total)")
     return kmz_path
