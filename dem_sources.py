@@ -67,68 +67,83 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     The staged S3 ``current`` path is not guaranteed to contain the legacy
     unsuffixed filename. TNMAccess is the authoritative product index and may
     return either the current product or a dated historical product when the
-    current staging record is temporarily absent.  Both are valid 3DEP
+    current staging record is temporarily absent. Both are valid 3DEP
     seamless 1-arc-second DEMs for viewshed work.
     """
     south = lat_north - 1
     west = -float(lon_west)
     east = west + 1.0
     bbox = f"{west},{south},{east},{lat_north}"
+    tile = f"n{south:02d}w{lon_west:03d}"
     urls: list[str] = []
 
-    # This is the current TNM dataset tag. The older "3DEP 1 arc-second"
-    # label is not consistently accepted by TNMAccess and can return no items.
+    # TNM currently exposes the 1-arc-second DEM under this dataset tag.
+    # The base tag is also queried because it can return retained historical
+    # products when a tile is no longer present in the current staging folder.
     datasets = (
         "National Elevation Dataset (NED) 1 arc-second Current",
         "National Elevation Dataset (NED) 1 arc-second",
     )
-    for dataset in datasets:
-        try:
-            response = requests.get(
-                USGS_TNM_API,
-                params={
-                    "datasets": dataset,
-                    "bbox": bbox,
-                    "prodExtents": "1 x 1 degree",
-                    "prodFormats": "GeoTIFF,TIFF",
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception:
-            continue
+    query_formats = ("GeoTIFF", None)
 
-        for item in data.get("items", []):
-            url = item.get("downloadURL")
-            if not url or url in urls:
+    for dataset in datasets:
+        for product_format in query_formats:
+            params = {
+                "datasets": dataset,
+                "bbox": bbox,
+                "prodExtents": "1 x 1 degree",
+            }
+            if product_format:
+                params["prodFormats"] = product_format
+
+            try:
+                response = requests.get(
+                    USGS_TNM_API,
+                    params=params,
+                    timeout=30,
+                )
+                response.raise_for_status()
+                data = response.json()
+                if data.get("errorMessage"):
+                    raise RuntimeError(str(data["errorMessage"]))
+            except Exception as exc:
+                print(f"      TNM lookup failed ({dataset}, {product_format or 'all formats'}): {exc}")
                 continue
-            # Only accept the requested 1-degree 1-arc-second GeoTIFF family.
-            # TNM may return multiple products intersecting the bbox.
-            name = url.rsplit("/", 1)[-1].lower()
-            tile = f"n{south:02d}w{lon_west:03d}"
-            if tile in name and name.endswith((".tif", ".tiff", ".zip")):
-                urls.append(url)
+
+            found = 0
+            for item in data.get("items", []):
+                url = item.get("downloadURL")
+                if not url or url in urls:
+                    continue
+                # Only accept the requested 1-degree 1-arc-second GeoTIFF family.
+                # TNM may return multiple products intersecting the bbox.
+                name = url.rsplit("/", 1)[-1].lower()
+                if tile in name and name.endswith((".tif", ".tiff", ".zip")):
+                    urls.append(url)
+                    found += 1
+
+            if found:
+                break
 
         if urls:
             break
 
-    # Prefer current products, then dated historical products. Within each
-    # group, newer dated products sort first so a stale historical tile is only
-    # used when no newer product is available.
+    # Prefer current products, then dated historical products. Within the
+    # historical group, newest dated products are preferred.
     def _candidate_key(url: str):
         lower = url.lower()
         is_current = "/current/" in lower
         filename = url.rsplit("/", 1)[-1]
-        date_suffix = ""
         stem = filename.rsplit(".", 1)[0]
+        date_suffix = ""
         if "_" in stem:
             maybe_date = stem.rsplit("_", 1)[-1]
             if len(maybe_date) == 8 and maybe_date.isdigit():
                 date_suffix = maybe_date
-        return (not is_current, date_suffix == "", date_suffix)
+        date_value = int(date_suffix) if date_suffix else -1
+        return (not is_current, -date_value)
 
-    return sorted(urls, key=_candidate_key, reverse=False)
+    return sorted(urls, key=_candidate_key)
 
 
 def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
