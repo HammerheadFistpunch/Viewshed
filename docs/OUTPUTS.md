@@ -16,66 +16,107 @@ ViewshedData/jobs/<timestamp>/output/
 
 The UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF** after a successful run.
 
-## KMZ layers
+## Output architecture in 2.1.0
 
-Signal Peak 1.2.0 retains the network output products introduced in 1.1.0 while allowing each station to use its own RF assumptions when configured.
+Signal Peak 2.1.0 separates station metadata from coverage visualization. Station pins no longer imply that per-station coverage overlays must also be exported.
 
-### Granular Network Margin
+The Output tab provides presets plus independent layer selection for:
 
-This is the default visible network layer. Signal Peak reprojects the successfully modeled per-station rasters onto the job analysis grid and keeps the **best remaining link margin** at each cell.
+- Station pins / metadata
+- Composite heat map
+- Positive coverage
+- Coverage gaps
+- Coverage redundancy
+- Per-station heat maps
 
-The color scale is stepped in configurable dB bands. The default is **3 dB per band**, using a blue → cyan → green → yellow → orange → red progression from the modeled operational edge toward stronger remaining margin. The legend is generated from the same configured band size and maximum displayed margin.
+Presets are **Standard**, **Coverage Analysis**, **Station Analysis**, **Everything**, and **Custom**.
 
-This surface is not a count of stations. A cell represents the strongest modeled remaining margin available from any included station.
+## Composite heat map
 
-### Inverse Coverage — APRS Not Expected
+The composite heat map keeps the strongest remaining modeled link margin available from any included station at each cell.
 
-The inverse layer marks cells inside the requested analysis region where no included station has positive modeled remaining margin.
+The color scale is stepped in configurable dB bands. `0 dB` is the modeled operational edge. The weak-to-strong palette can be customized without changing the underlying propagation calculation or margin thresholds.
 
-This is a threshold/dead-zone product. It does **not** estimate how many dB below threshold a dead-zone cell is because the current per-station operational raster does not preserve a reliable negative-margin surface.
+## Per-station heat maps
 
-The inverse layer is included in the KMZ but is off by default.
+Individual station heat maps now use the same stepped remaining-link-margin palette as the composite heat map. The older station-specific monochrome color scheme is retired.
 
-### Per-station viewsheds
+Per-station heat maps are independent from station pins/metadata and can be omitted without removing the station markers.
 
-Individual digipeater and iGate overlays remain in the KMZ for site-by-site inspection and can be toggled independently from the network layers.
+## Positive coverage
 
-In 1.2.0, those per-station rasters may be based on station-specific height, TX power, gain, frequency, or path-loss cap rather than one shared global assumption set.
+The Positive Coverage layer marks cells where at least one modeled station has positive remaining link margin. Its display color and opacity are configurable.
 
-## Legend
+## Coverage gaps
 
-The KMZ legend shows:
+The Coverage Gaps layer marks cells inside the requested analysis region where no included station has positive modeled remaining margin.
 
-- the stepped best-margin color scale and configured dB band size
-- `0 dB` as the modeled operational edge
-- the configured maximum displayed margin
-- an inverse/dead-zone swatch
-- references for the per-station digipeater and iGate overlays
+This is a threshold/dead-zone product, not a negative-margin gradient.
 
-## GeoTIFF products
+## Coverage redundancy
 
-`coverage_count.tif` counts how many unique per-station rasters have positive modeled margin at each grid cell. It remains useful for GIS processing but is **not** a signal-strength surface.
+The Coverage Redundancy layer is derived from the number of modeled stations with positive remaining margin at each cell:
 
-The work directory also contains:
+- **1 station** — single-source / fragile coverage
+- **2 stations** — some redundancy
+- **3+ stations** — stronger network redundancy
 
-- `network_best_margin.tif` — best positive/zero remaining margin from the modeled network
-- `inverse_coverage.tif` — binary dead-zone mask used to render the inverse layer
-- per-station `viewshed_*.tif` rasters
+The three redundancy classes have configurable colors.
 
-## Per-station link margin
+## Styling and opacity
 
-Per-station modeled link margin uses **0 dB** as the reference operational edge. Positive margin indicates remaining modeled budget; below-threshold values are not treated as reliable operational coverage.
+The Output tab controls:
+
+- heat-map band size
+- maximum displayed margin
+- overlay opacity
+- weak-to-strong heat-map palette
+- positive coverage color
+- coverage-gap color
+- redundancy colors
+
+Styling changes presentation only. They do not change terrain, ITM, path-loss, or link-budget math.
+
+## KMZ organization
+
+KMZ output separates stations from coverage products. A typical 2.1.0 structure is:
+
+```text
+Signal Peak Analysis
+├─ Stations
+├─ Coverage Analysis
+│  ├─ Composite Heat Map
+│  ├─ Positive Coverage
+│  ├─ Coverage Gaps
+│  └─ Coverage Redundancy
+└─ Per-Station Heat Maps
+```
+
+Only selected output products are included. Station pins and per-station heat maps are independent roots so either can be toggled without forcing the other.
+
+## GeoTIFF and raster products
+
+`coverage_count.tif` counts how many unique per-station rasters have positive modeled margin at each grid cell. It is useful for GIS processing and redundancy analysis but is not a signal-strength surface.
+
+The work/output data can also include:
+
+- `network_best_margin.tif` — strongest remaining margin from the modeled network
+- `network_margin_bands.png` — rendered composite heat map
+- `positive_coverage.png` — positive-coverage mask
+- `inverse_coverage.png` — gap/dead-zone mask
+- `coverage_redundancy.png` — redundancy classes
+- per-station viewshed rasters
 
 ## Hard circular edges
 
-A clean circular edge centered on a station usually indicates the configured **maximum calculation range**, not a physical propagation boundary. Increase the calculation range if useful modeled margin is still present at the edge and a longer analysis is required.
+A clean circular edge centered on a station usually indicates the configured **maximum calculation range**, not a physical propagation boundary. Increase the calculation range if useful modeled margin remains at the edge and a longer analysis is required.
 
 ## Units
 
-The Metric/Imperial setting does not change output physics or raster coordinate math. It changes operator-facing distance/height input and display only; jobs are converted to metric before propagation.
+Metric/Imperial changes operator-facing distance and height input/display only. Propagation and raster coordinate math remain metric internally.
 
 ## Interpreting results
 
-Coverage is a prediction based on terrain and configured radio/model assumptions. Review the Station Data RF-source column and Advanced settings when comparing results, especially when some stations use curated overrides and others use global fallbacks.
+Coverage is a prediction based on terrain and configured radio/model assumptions. Review Station Data RF sources, Advanced assumptions, and Resources settings when comparing results.
 
 See `SPECIAL_CONSIDERATIONS.md` and `PROPAGATION_MODEL.md` before using results for operational decisions.
