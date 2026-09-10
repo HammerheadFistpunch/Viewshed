@@ -3,9 +3,9 @@
 
 This utility is intentionally separate from Signal Peak's runtime DEM code.
 It uses the TNMAccess API to discover current 1-degree GeoTIFF products and
-then downloads them with retry/resume-safe .part files.  The resulting archive
-can be wired into Signal Peak later without making the application depend on
-live USGS URLs.
+then downloads them with retry-safe .part files. The resulting archive can be
+wired into Signal Peak later without making the application depend on live
+USGS URLs.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import sys
 import threading
 import time
@@ -28,7 +27,6 @@ import requests
 
 TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 DEFAULT_BBOX = (-125.0, 24.0, -66.0, 50.0)  # CONUS bounding box; includes fringe tiles.
-TILE_RE = re.compile(r"(?:USGS_(?:1|13)_)?([ns])(\d{1,2})([ew])(\d{1,3})", re.I)
 
 RESOLUTIONS = {
     "1": {
@@ -174,8 +172,8 @@ def discover_tile(
         detail = "; ".join(errors) if errors else "no matching current product returned"
         raise RuntimeError(f"{tile.upper()} discovery failed: {detail}")
 
-    # Prefer URLs explicitly staged under /current/. Otherwise choose the
-    # newest publication date returned by TNMAccess.
+    # Prefer URLs explicitly staged under /current/. Within that group, prefer
+    # the newest publication date returned by TNMAccess.
     candidates.sort(
         key=lambda item: (
             not is_current_url(item["url"]),
@@ -216,7 +214,6 @@ def download_file(
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            # Restart partial downloads rather than risking a corrupted archive.
             part.unlink(missing_ok=True)
             with session.get(item["url"], stream=True, timeout=timeout) as response:
                 response.raise_for_status()
@@ -333,7 +330,8 @@ def main() -> int:
             key = f"{resolution}:{tile_name(lat, lon)}"
             if not args.refresh and key in manifest["tiles"]:
                 existing = manifest["tiles"][key]
-                if existing.get("path") and Path(existing["path"]).exists():
+                existing_path = existing.get("path")
+                if existing_path and (args.output / existing_path).exists():
                     continue
             work.append((resolution, lat, lon))
 
@@ -354,8 +352,6 @@ def main() -> int:
             return key, item
         spec = RESOLUTIONS[resolution]
         name = item["url"].rsplit("/", 1)[-1]
-        # Normalize ZIP product names to the archive's final filename.  GeoTIFF
-        # is preferred, but retaining a ZIP is safer than silently changing it.
         target = args.output / spec["directory"] / name
         result = download_file(session(), item, target, args.download_timeout, args.retries)
         return key, result
@@ -367,7 +363,8 @@ def main() -> int:
             resolution, lat, lon = job
             try:
                 key, result = future.result()
-                result["path"] = os.path.relpath(result["path"], args.output)
+                if not args.discover_only:
+                    result["path"] = os.path.relpath(result["path"], args.output)
                 manifest["tiles"][key] = result
                 completed += 1
                 action = "discovered" if args.discover_only else ("skipped" if result.get("skipped") else "downloaded")
