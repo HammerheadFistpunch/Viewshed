@@ -1,6 +1,6 @@
 # Signal Peak Quick Start
 
-This is the shortest path from launching Signal Peak 2.0.0 to producing a coverage result.
+This is the shortest path from launching Signal Peak 2.1.0 to producing a coverage result.
 
 ## 1. Launch Signal Peak
 
@@ -19,11 +19,13 @@ Persistent data is stored under `ViewshedData/` beside the executable when possi
 
 Finding stations does not run terrain propagation. Signal Peak samples APRS-IS, merges cache/seed data, applies reviewed coordinate corrections, and can cross-check nearby OpenStreetMap communications infrastructure.
 
-Signal Peak may search beyond the Area boundary for acquisition purposes, but 2.0.0 limits the final propagation station set to station centers inside the selected Area radius.
+Signal Peak may search beyond the Area boundary for acquisition purposes, but the final propagation station set is limited to station centers inside the selected Area radius.
 
 ## 3. Review station locations
 
-If the Area panel reports stations needing review, open **Corrections**. OSM corroboration is evidence only and does not automatically move a station.
+Open **Corrections** when stations need attention. Reviewed corrections are saved separately from seed/cache/APRS station data and are automatically reapplied by callsign on later runs.
+
+Correction states are shown as saved correction, pending review candidate, needs review, or uncorrected. If the Needs Review queue is empty, Signal Peak can show the full correction catalog instead of leaving the list blank.
 
 ## 4. Review station RF data
 
@@ -41,13 +43,21 @@ Open **Resources** before a run when you want to control compute/detail behavior
 
 **Memory limit (GB)** is an optional planning ceiling. Enter `0` for automatic management. Signal Peak keeps RAM in reserve for Windows and other applications and automatically reduces parallel workers when necessary.
 
-Use **Refresh system resources** to view available RAM and CPU information.
+The Resources model owns DEM sizing and worker planning. The old Worker DEM max-dimension control is no longer exposed in Advanced.
 
-## 6. Set radio, units, and output assumptions
+## 6. Set radio and output assumptions
 
-Open **Advanced** for Area/Station RF assumptions. TX power can be entered in **Watts or dBm**. Metric/Imperial changes operator-facing input/display units only; propagation remains metric internally.
+Open **Advanced** for RF/link-budget assumptions and Metric/Imperial display/input options. TX power can be entered in Watts or dBm.
 
-Open **Output** for presentation controls such as heatmap band size, maximum displayed margin, per-station display floor, and opacity.
+Open **Output** to choose what gets exported and how it is styled. Presets are:
+
+- **Standard**
+- **Coverage Analysis**
+- **Station Analysis**
+- **Everything**
+- **Custom**
+
+Available layers include station pins/metadata, composite heat map, positive coverage, coverage gaps, redundancy, and per-station heat maps. Composite and per-station heat maps use the same stepped link-margin palette.
 
 ## 7. Run propagation
 
@@ -61,19 +71,11 @@ DEM cache entries are resolution-aware. Existing terrain is reused when it meets
 
 After completion use **Open Output Folder**, **Open KMZ**, or **Open GeoTIFF**.
 
-The KMZ contains:
-
-- **Granular Network Margin** — best remaining modeled link margin from any included station.
-- **Inverse Coverage — APRS Not Expected** — cells where no included station has positive modeled margin.
-- **Per-station viewsheds** — individual digipeater/iGate overlays.
+The KMZ can contain independently selectable station pins, composite heat map, positive coverage, coverage gaps, redundancy, and per-station heat maps according to the Output preset or custom layer selection.
 
 **0 dB remaining margin is the modeled operational edge.**
 
 Job files are stored under `ViewshedData/jobs/<timestamp>/output/`.
-
-## Station mode
-
-After an Area station search, the Station tab shows only that search's station set. Use **Load full cached catalog** when you intentionally want the cumulative station cache.
 
 ## Important limitation
 
