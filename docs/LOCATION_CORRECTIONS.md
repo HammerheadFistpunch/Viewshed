@@ -1,6 +1,6 @@
 # Signal Peak Location Corrections
 
-Signal Peak keeps station-location correction separate from station RF assumptions. A reviewed coordinate answers **where should this station be modeled?**; a Station Data override answers **what radio assumptions should this station use?**. The two registries are independent.
+Signal Peak keeps station-location corrections separate from seed/cache/APRS station data and from station RF assumptions. A reviewed coordinate answers **where should this station be modeled?**; a Station Data override answers **what radio assumptions should this station use?**.
 
 ## Coordinate concepts
 
@@ -11,6 +11,31 @@ Signal Peak preserves three coordinate concepts:
 - **Proposed/reviewed coordinate** — a candidate or human-approved replacement.
 
 A reviewed correction changes the model coordinate while preserving the reported coordinate and provenance.
+
+## Persistent correction storage
+
+Reviewed corrections are stored in:
+
+```text
+ViewshedData/station_location_overrides.json
+```
+
+They are keyed by callsign and are reapplied whenever that station is loaded again. Correcting a station does **not** rewrite the seed file or APRS/cache source record.
+
+As long as the persistent `ViewshedData` correction registry remains available and the callsign remains the same, an approved station does not need to be corrected again simply because a different seed file or refreshed station cache is used.
+
+## Correction states in 2.1.0
+
+The Corrections UI now exposes the current state directly:
+
+- **Saved correction — approved and used for propagation**
+- **Needs review — saved candidate awaiting approval**
+- **Needs review**
+- **Uncorrected**
+
+The default queue prioritizes stations requiring attention. If no stations currently need review, Signal Peak falls back to the full correction catalog rather than presenting an empty list.
+
+The selected station is also redrawn after the Corrections tab becomes visible, preventing the earlier behavior where the map could remain blank until **Next** was clicked.
 
 ## Confidence and freshness
 
@@ -32,18 +57,20 @@ Signal Peak does not silently move a station to an OSM feature. Human review is 
 
 1. Acquire or load stations.
 2. Open **Corrections**.
-3. Review stations in the Needs Review queue; use **Show All** when needed.
-4. Compare reported/model coordinates with Standard/Topo map context and OSM evidence.
+3. Review the Needs Review queue or use **Show All**.
+4. Compare reported/model coordinates with map context and available evidence.
 5. Select or enter a proposed coordinate when a correction is justified.
-6. Save/approve the correction.
-
-Reviewed corrections are stored under `ViewshedData/station_location_overrides.json` and are reapplied after station acquisition.
+6. Save as a candidate or approve the correction.
 
 ## Relationship to Station Data
 
-Signal Peak 1.2.0 stores RF edits separately in `ViewshedData/station_rf_overrides.json`.
+RF edits are stored separately in:
 
-Changing RF height, power, gain, frequency, or path-loss assumptions does **not** change the station coordinate. Likewise, correcting a coordinate does not create or alter RF assumptions.
+```text
+ViewshedData/station_rf_overrides.json
+```
+
+Changing RF height, power, gain, frequency, or path-loss assumptions does not change the station coordinate. Likewise, correcting a coordinate does not create or alter RF assumptions.
 
 This separation lets live APRS data refresh, reviewed coordinate corrections, and manually curated RF information coexist without overwriting one another.
 
