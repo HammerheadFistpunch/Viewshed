@@ -11,6 +11,7 @@ from viewshed_core import Region, assess_station_locations, portable_data_root, 
 
 ADVANCED_DEFAULTS = {
     "max_path_loss_db": 148.0,
+    "operational_reserve_db": 0.0,
     "tx_power_dbm": 47.0,
     "tx_antenna_gain_dbd": 0.0,
     "rx_sensitivity_dbm": -119.0,
@@ -74,7 +75,8 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             tab,
             text=(
                 "These values materially change predicted coverage. Defaults are the Viewshed reference profile. "
-                "Advanced settings apply to Area and Station runs; Custom mode keeps its own site-specific radio controls."
+                "Shared propagation and link-budget settings apply to Area, Station, and Custom runs; "
+                "Station and Custom modes may override only their site-specific transmitter values."
             ),
             wraplength=900,
         ).pack(anchor="w", pady=(3, 10))
@@ -95,6 +97,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
         rf_fields = [
             ("Operational path-loss cap (dB)", "max_path_loss_db"),
+            ("Operational reserve (dB)", "operational_reserve_db"),
             ("TX power (dBm)", "tx_power_dbm"),
             ("TX antenna gain (dBd)", "tx_antenna_gain_dbd"),
             ("RX sensitivity (dBm)", "rx_sensitivity_dbm"),
@@ -141,6 +144,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         try:
             values = {
                 "max_path_loss_db": float(self._advanced_vars["max_path_loss_db"].get()),
+                "operational_reserve_db": float(self._advanced_vars["operational_reserve_db"].get()),
                 "tx_power_dbm": float(self._advanced_vars["tx_power_dbm"].get()),
                 "tx_antenna_gain_dbd": float(self._advanced_vars["tx_antenna_gain_dbd"].get()),
                 "rx_sensitivity_dbm": float(self._advanced_vars["rx_sensitivity_dbm"].get()),
@@ -164,6 +168,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
         checks = [
             (80 <= values["max_path_loss_db"] <= 200, "Path-loss cap must be 80–200 dB."),
+            (0 <= values["operational_reserve_db"] <= 60, "Operational reserve must be 0–60 dB."),
             (0 <= values["tx_power_dbm"] <= 80, "TX power must be 0–80 dBm."),
             (-20 <= values["tx_antenna_gain_dbd"] <= 30, "TX antenna gain must be -20 to 30 dBd."),
             (-160 <= values["rx_sensitivity_dbm"] <= -50, "RX sensitivity must be -160 to -50 dBm."),
@@ -198,13 +203,13 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         except Exception as exc:
             messagebox.showerror("Invalid Advanced settings", str(exc), parent=self)
             return
-        self.advanced_status.set("Advanced settings saved and will be used by Area and Station runs.")
+        self.advanced_status.set("Advanced settings saved and will be used by Area, Station, and Custom runs.")
 
     def _reset_advanced(self) -> None:
         for key, value in ADVANCED_DEFAULTS.items():
             self._advanced_vars[key].set(str(value))
         _save_advanced(dict(ADVANCED_DEFAULTS))
-        self.advanced_status.set("Reset to Viewshed reference defaults (148 dB path-loss cap).")
+        self.advanced_status.set("Reset to Viewshed reference defaults.")
 
     def run_area(self) -> None:
         if not self._area_records:
