@@ -16,8 +16,11 @@ class ViewshedWorkspace(_FeatureWorkspace):
 
     TOOLTIP_TEXT = {
         "Operational path-loss cap (dB)": (
-            "The maximum modeled signal loss Signal Peak will treat as usable coverage. "
-            "Lower values make the prediction more conservative; higher values extend coverage farther."
+            "The maximum modeled signal loss Signal Peak will consider before the operational reserve is applied."
+        ),
+        "Operational reserve (dB)": (
+            "A safety margin subtracted from the available link budget after the path-loss cap is applied. "
+            "This shared value applies to Area, Station, and Custom runs. Higher values make coverage more conservative."
         ),
         "TX power (dBm)": (
             "Transmitter output power expressed in dBm. You can use the watts option below if watts are more familiar."
@@ -171,6 +174,21 @@ class ViewshedWorkspace(_FeatureWorkspace):
         _TunedWorkspace._build_custom(self)
         self.custom_power_value = self.custom_power_w
         self.custom_power_dbm_mode = tk.BooleanVar(value=False)
+
+        # Remove the legacy Custom-only reserve assumption. Operational reserve
+        # is now a shared Advanced setting for every propagation mode.
+        def remove_legacy_note(widget) -> None:
+            for child in widget.winfo_children():
+                try:
+                    text = str(child.cget("text"))
+                except Exception:
+                    text = ""
+                if isinstance(child, ttk.Label) and "operational reserve" in text.lower():
+                    child.destroy()
+                    continue
+                remove_legacy_note(child)
+
+        remove_legacy_note(self.custom_tab)
 
     def run_custom(self) -> None:
         if getattr(self, "_imperial", False):
