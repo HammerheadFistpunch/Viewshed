@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+import station_sources
+import viewshed_core
 from power_ui_cleanup_workspace import ViewshedWorkspace as _ViewshedWorkspace
 from resource_planner import format_gb, format_plan, get_system_resources, plan_resources
 from tooltips import add_tooltip
 from viewshed_core import portable_data_root
 
 
+PRODUCT_VERSION = "2.0.0"
+PRODUCT_HOME = "https://github.com/HammerheadFistpunch/Viewshed"
 _RESOURCE_PREFS = "resource_settings.json"
 _DETAIL_VALUES = ("Auto", "Fast", "Standard", "High", "Max")
 
@@ -40,10 +45,34 @@ def _save_resource_prefs(mode: str, memory_limit_gb: float) -> None:
     )
 
 
+def _sync_release_identity() -> None:
+    """Keep the legacy Help/About wrapper aligned with the V2 product release."""
+    viewshed_core.APP_VERSION = PRODUCT_VERSION
+    station_sources.USER_AGENT = f"SignalPeak/{PRODUCT_VERSION} (+{PRODUCT_HOME})"
+
+    help_module = sys.modules.get("help_workspace")
+    if help_module is None:
+        return
+
+    help_module.PRODUCT_VERSION = PRODUCT_VERSION
+    help_module.APP_VERSION = PRODUCT_VERSION
+    workspace = getattr(help_module, "ViewshedWorkspace", None)
+    docs = getattr(workspace, "DOCS", None)
+    if not isinstance(docs, list):
+        return
+
+    release_entry = ("2.0.0 Release Notes", "docs/RELEASE_NOTES_2.0.0.md")
+    updated = [entry for entry in docs if entry[1] != "docs/RELEASE_NOTES_2.0.0.md"]
+    insert_at = next((i for i, entry in enumerate(updated) if entry[1] == "docs/RELEASE_NOTES_1.2.0.md"), 4)
+    updated.insert(insert_at, release_entry)
+    workspace.DOCS = updated
+
+
 class ViewshedWorkspace(_ViewshedWorkspace):
     """V2 terrain-detail presets and memory-aware propagation planning."""
 
     def __init__(self, master, app) -> None:
+        _sync_release_identity()
         self._resource_prefs = _load_resource_prefs()
         super().__init__(master, app)
         self._build_resource_tab()
@@ -115,14 +144,20 @@ class ViewshedWorkspace(_ViewshedWorkspace):
 
         add_tooltip(
             detail_label,
-            "Controls the terrain-detail target. Fast favors speed, Standard balances speed and detail, High preserves smaller terrain features, and Max preserves as much terrain detail as the computer can safely handle.",
+            "Auto chooses a safe balanced plan from the current run and available system resources. Fast favors speed and lower memory use. Standard balances speed and terrain detail. High preserves smaller terrain features at higher compute cost. Max prioritizes stability first and terrain resolution second, and may reduce processing to one station at a time.",
         )
-        add_tooltip(detail_combo, "The selected preset is converted into terrain resolution, memory use, and a safe number of parallel workers for each run.")
+        add_tooltip(
+            detail_combo,
+            "Each preset is converted immediately before a run into DEM resolution, memory budget, analysis raster size, and a safe parallel-worker count. Cached terrain is reused only when it satisfies the requested resolution.",
+        )
         add_tooltip(
             memory_label,
-            "Optional ceiling for Signal Peak resource planning. Enter 0 to let Signal Peak use currently available memory automatically. The planner always keeps additional RAM in reserve for Windows and other programs.",
+            "Optional ceiling for Signal Peak resource planning. Enter 0 to use currently available memory automatically. The planner keeps additional RAM in reserve for Windows and other programs and will reduce worker count before risking memory overflow.",
         )
-        add_tooltip(memory_entry, "Enter the maximum RAM in GB that Signal Peak may plan around, or 0 for automatic memory management.")
+        add_tooltip(
+            memory_entry,
+            "Enter the maximum RAM in GB that Signal Peak may plan around, or 0 for automatic memory management. This is a planning ceiling, not a request to allocate that amount of RAM.",
+        )
 
         self._update_resource_warning()
         self._refresh_resource_status()
@@ -150,7 +185,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             return
         if self.terrain_detail_mode.get().strip().lower() == "max":
             self.resource_warning.set(
-                "WARNING: Maximum detail prioritizes stability first and terrain resolution second. "
+                "WARNING: Max detail prioritizes stability first and terrain resolution second. "
                 "Signal Peak may reduce parallel processing to one station at a time. Large Max runs can be VERY slow."
             )
         else:
