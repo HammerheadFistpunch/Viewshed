@@ -111,10 +111,3 @@ def apply_output_preset(name: str) -> dict[str, bool]:
         "Everything": dict(output_stations=True, output_network_heatmap=True, output_positive=True, output_gaps=True, output_redundancy=True, output_per_station_heatmaps=True),
     }
     return presets.get(name, {})
-
-
-# Imported here so the correction fallback is installed during normal UI startup
-# without changing the propagation or station-acquisition layers.
-from correction_filter_fix import install_correction_filter_fix
-
-install_correction_filter_fix()
