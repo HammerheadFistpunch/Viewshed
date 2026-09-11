@@ -262,6 +262,15 @@ def prepare_job(
 def _job_stations(job: JobConfig) -> list[dict]:
     if job.frozen_stations:
         records = assess_station_locations(load_station_records(Path(job.filtered_stations)))
+        before = len(records)
+        records = filter_stations(records, job.region, set(job.include_types), job.propagation_radius_km)
+        dropped = before - len(records)
+        if dropped:
+            print(
+                f"   ⚠  Dropped {dropped} saved station(s) outside the "
+                f"{job.region.radius_km + job.propagation_radius_km:.0f} km acquisition radius "
+                "(likely a stale or corrupted GPS position from when the list was saved)."
+            )
         Path(job.filtered_stations).write_text(json.dumps(records, indent=2), encoding="utf-8")
         return records
     records = acquire_area_stations(
