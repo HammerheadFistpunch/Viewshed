@@ -24,9 +24,9 @@ They are keyed by callsign and are reapplied whenever that station is loaded aga
 
 As long as the persistent `ViewshedData` correction registry remains available and the callsign remains the same, an approved station does not need to be corrected again simply because a different seed file or refreshed station cache is used.
 
-## Correction states in 2.1.0
+## Correction states
 
-The Corrections UI now exposes the current state directly:
+Signal Peak exposes the current correction state directly:
 
 - **Saved correction — approved and used for propagation**
 - **Needs review — saved candidate awaiting approval**
