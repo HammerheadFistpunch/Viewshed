@@ -61,52 +61,86 @@ def _download_url(requests, url: str, target: Path, timeout: int = 120) -> None:
 
 
 def _iter_product_urls(item: dict) -> list[str]:
+    """Extract GeoTIFF/archive URLs from the common TNMAccess response shapes."""
     urls: list[str] = []
     seen: set[str] = set()
-    direct = item.get("downloadURL")
-    if isinstance(direct, str) and direct:
-        seen.add(direct)
-        urls.append(direct)
+
+    def add(value) -> None:
+        if isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            urls.append(value)
+
+    add(item.get("downloadURL"))
+    add(item.get("downloadUrl"))
+    add(item.get("url"))
+
     files = item.get("files")
     if isinstance(files, list):
         for entry in files:
-            if not isinstance(entry, dict):
-                continue
-            for key in ("downloadURL", "url", "downloadUrl"):
-                candidate = entry.get(key)
-                if isinstance(candidate, str) and candidate and candidate not in seen:
-                    seen.add(candidate)
-                    urls.append(candidate)
+            if isinstance(entry, dict):
+                add(entry.get("downloadURL"))
+                add(entry.get("downloadUrl"))
+                add(entry.get("url"))
+
+    urls_obj = item.get("urls")
+    if isinstance(urls_obj, dict):
+        for value in urls_obj.values():
+            add(value)
+
     return urls
+
+
+def _item_text(item: dict) -> str:
+    values = []
+    for key in ("title", "name", "description", "dataset", "datasetName", "sourceName"):
+        value = item.get(key)
+        if value:
+            values.append(str(value))
+    return " ".join(values).lower()
 
 
 def _is_current(item: dict, url: str) -> bool:
     lower = url.lower()
-    text = " ".join(str(item.get(k) or "") for k in ("title", "name", "description", "dataset")).lower()
+    text = _item_text(item)
     return "/current/" in lower or " current" in text or text.endswith("current")
 
 
 def _publication_date(item: dict, url: str) -> str:
-    value = item.get("publicationDate") or item.get("dateCreated") or ""
+    value = item.get("publicationDate") or item.get("dateCreated") or item.get("date") or ""
     if value:
         return str(value)
     match = re.search(r"_(\d{8})(?:\.|$)", url.rsplit("/", 1)[-1])
     return match.group(1) if match else ""
 
 
-def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
-    """Discover actual 1-arc-second products from TNMAccess.
+def _current_from_historical(url: str) -> str | None:
+    """Convert a TNM historical 1-arc-second URL to its corresponding current object."""
+    lower = url.lower()
+    if "/historical/" not in lower:
+        return None
+    current = url.replace("/historical/", "/current/")
+    current = re.sub(r"_(\d{8})(?=\.(?:tif|tiff|zip)(?:$|\?))", "", current, flags=re.IGNORECASE)
+    return current
 
-    TNMAccess is authoritative for the product record. Do not require the
-    legacy ``USGS_1_<tile>.tif`` filename: current products can have a
-    different staged filename, and product records may expose URLs in a
-    nested ``files`` collection.
+
+def _candidate_key(url: str) -> str:
+    return url.split("?", 1)[0].lower()
+
+
+def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
+    """Discover usable 1-arc-second products for a Signal Peak tile.
+
+    TNMAccess product records can lag the live S3 layout and may expose a
+    historical URL even when the corresponding current object is available.
+    Treat the API result as product discovery, then test the current object
+    derived from that record before falling back to the historical file.
     """
     south = lat_north - 1
     west = -float(lon_west)
     east = west + 1.0
     bbox = f"{west},{south},{east},{lat_north}"
     tile = f"n{south:02d}w{lon_west:03d}".lower()
+
     candidates: list[tuple[bool, str, str]] = []
     seen: set[str] = set()
     errors: list[str] = []
@@ -115,11 +149,11 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
         {"datasets": "National Elevation Dataset (NED) 1 arc-second Current"},
         {"datasets": "National Elevation Dataset (NED) 1 arc-second"},
         {"q": "1 arc-second DEM"},
-        {"q": "National Elevation Dataset (NED) 1 arc-second Current"},
+        {"q": f"USGS 1 Arc Second {tile}"},
     )
 
     for extra in queries:
-        params = {**extra, "bbox": bbox, "prodExtents": "1 x 1 degree"}
+        params = {**extra, "bbox": bbox, "prodFormats": "GeoTIFF", "max": 50}
         try:
             response = requests.get(USGS_TNM_API, params=params, timeout=30)
             response.raise_for_status()
@@ -133,27 +167,36 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
         for item in data.get("items", []):
             if not isinstance(item, dict):
                 continue
+            text = _item_text(item)
             title = str(item.get("title") or "").lower()
             for url in _iter_product_urls(item):
                 lower = url.lower()
                 clean_url = lower.split("?", 1)[0]
                 if not clean_url.endswith((".tif", ".tiff", ".zip")):
                     continue
-                if url in seen:
+                if _candidate_key(url) in seen:
                     continue
-                if tile not in lower and tile not in title:
+                if tile not in lower and tile not in title and tile not in text:
                     continue
-                seen.add(url)
+                seen.add(_candidate_key(url))
                 candidates.append((_is_current(item, url), _publication_date(item, url), url))
+
+                # TNMAccess has historically returned the historical product
+                # URL even when its current counterpart is the desired object.
+                current_url = _current_from_historical(url)
+                if current_url and _candidate_key(current_url) not in seen:
+                    seen.add(_candidate_key(current_url))
+                    candidates.insert(0, (True, _publication_date(item, current_url), current_url))
 
     if not candidates:
         detail = "; ".join(errors) if errors else "TNMAccess returned no matching product URLs"
         raise RuntimeError(f"no TNMAccess product for {tile.upper()}: {detail}")
 
     current = [entry for entry in candidates if entry[0]]
-    pool = current if current else candidates
-    pool.sort(key=lambda entry: entry[1], reverse=True)
-    return [entry[2] for entry in pool]
+    historical = [entry for entry in candidates if not entry[0]]
+    current.sort(key=lambda entry: entry[1], reverse=True)
+    historical.sort(key=lambda entry: entry[1], reverse=True)
+    return [entry[2] for entry in current + historical]
 
 
 def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
@@ -180,7 +223,8 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
     candidates = _tnm_candidates(requests, lat_north, lon_west)
     for url in candidates:
         try:
-            print(f"      Trying TNM product: {url.rsplit('/', 1)[-1]}")
+            source_kind = "current" if "/current/" in url.lower() else "historical fallback"
+            print(f"      Trying TNM {source_kind}: {url.rsplit('/', 1)[-1]}")
             _download_url(requests, url, target)
             return target
         except Exception as exc:
@@ -335,7 +379,6 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
         "output_width": actual_width,
         "output_height": actual_height,
         "adaptive_resolution": merge_res is not None,
-        "resolution_scale": float(merge_info["scale"]),
     }, indent=2), encoding="utf-8")
     print(f"done ({actual_width}x{actual_height}, {dem_path.stat().st_size / 1e6:.0f} MB, {time.perf_counter() - started:.1f}s)")
     return dem_path
