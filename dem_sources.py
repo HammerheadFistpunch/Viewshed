@@ -3,20 +3,18 @@ from __future__ import annotations
 import io
 import json
 import math
+import re
 import time
 import zipfile
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
 USGS_TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 USGS_3DEP_CURRENT = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1/TIFF/current"
-USGS_3DEP_BUCKET = "https://prd-tnm.s3.amazonaws.com/"
 
 
 def _tile_id(lat_north: int, lon_west: int) -> str:
-    """Return the USGS 1-degree tile id for a ceil-based north/west grid cell."""
     south = lat_north - 1
     return f"n{south:02d}w{lon_west:03d}"
 
@@ -27,7 +25,6 @@ def _current_tile_url(tile_id: str) -> str:
 
 def _validate_tif(path: Path) -> None:
     import rasterio
-
     with rasterio.open(path) as src:
         if src.width <= 0 or src.height <= 0 or src.count < 1:
             raise RuntimeError(f"Downloaded DEM is not a usable raster: {path.name}")
@@ -63,135 +60,100 @@ def _download_url(requests, url: str, target: Path, timeout: int = 120) -> None:
         raise
 
 
-
-def _s3_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
-    """Discover actual 1-degree 3DEP GeoTIFF keys from the public S3 index."""
-    south = lat_north - 1
-    tile = f"n{south:02d}w{lon_west:03d}"
-    candidates: list[str] = []
-
-    prefixes = (
-        f"StagedProducts/Elevation/1/TIFF/current/{tile}/",
-        f"StagedProducts/Elevation/1/TIFF/historical/{tile}/",
-    )
-    for prefix in prefixes:
-        try:
-            response = requests.get(
-                USGS_3DEP_BUCKET,
-                params={"list-type": "2", "prefix": prefix, "max-keys": 1000},
-                timeout=30,
-            )
-            response.raise_for_status()
-            root = ET.fromstring(response.content)
-        except Exception as exc:
-            print(f"      S3 listing failed ({prefix}): {exc}")
-            continue
-
-        for elem in root.iter():
-            if elem.tag.rsplit("}", 1)[-1] != "Key" or not elem.text:
+def _iter_product_urls(item: dict) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    direct = item.get("downloadURL")
+    if isinstance(direct, str) and direct:
+        seen.add(direct)
+        urls.append(direct)
+    files = item.get("files")
+    if isinstance(files, list):
+        for entry in files:
+            if not isinstance(entry, dict):
                 continue
-            key = elem.text
-            name = key.rsplit("/", 1)[-1].lower()
-            if tile in name and name.endswith((".tif", ".tiff", ".zip")):
-                candidates.append(USGS_3DEP_BUCKET + key)
+            for key in ("downloadURL", "url", "downloadUrl"):
+                candidate = entry.get(key)
+                if isinstance(candidate, str) and candidate and candidate not in seen:
+                    seen.add(candidate)
+                    urls.append(candidate)
+    return urls
 
-    def candidate_key(url: str):
-        lower = url.lower()
-        is_current = "/current/" in lower
-        filename = url.rsplit("/", 1)[-1]
-        stem = filename.rsplit(".", 1)[0]
-        date_suffix = ""
-        if "_" in stem:
-            maybe_date = stem.rsplit("_", 1)[-1]
-            if len(maybe_date) == 8 and maybe_date.isdigit():
-                date_suffix = maybe_date
-        return (not is_current, -(int(date_suffix) if date_suffix else -1))
 
-    return sorted(set(candidates), key=candidate_key)
+def _is_current(item: dict, url: str) -> bool:
+    lower = url.lower()
+    text = " ".join(str(item.get(k) or "") for k in ("title", "name", "description", "dataset")).lower()
+    return "/current/" in lower or " current" in text or text.endswith("current")
+
+
+def _publication_date(item: dict, url: str) -> str:
+    value = item.get("publicationDate") or item.get("dateCreated") or ""
+    if value:
+        return str(value)
+    match = re.search(r"_(\d{8})(?:\.|$)", url.rsplit("/", 1)[-1])
+    return match.group(1) if match else ""
+
 
 def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
-    """Return authoritative TNM 1-arc-second products for one 1-degree tile.
+    """Discover actual 1-arc-second products from TNMAccess.
 
-    The staged S3 ``current`` path is not guaranteed to contain the legacy
-    unsuffixed filename. TNMAccess is the authoritative product index and may
-    return either the current product or a dated historical product when the
-    current staging record is temporarily absent. Both are valid 3DEP
-    seamless 1-arc-second DEMs for viewshed work.
+    TNMAccess is authoritative for the product record. Do not require the
+    legacy ``USGS_1_<tile>.tif`` filename: current products can have a
+    different staged filename, and product records may expose URLs in a
+    nested ``files`` collection.
     """
     south = lat_north - 1
     west = -float(lon_west)
     east = west + 1.0
     bbox = f"{west},{south},{east},{lat_north}"
-    tile = f"n{south:02d}w{lon_west:03d}"
-    urls: list[str] = []
+    tile = f"n{south:02d}w{lon_west:03d}".lower()
+    candidates: list[tuple[bool, str, str]] = []
+    seen: set[str] = set()
+    errors: list[str] = []
 
-    # TNM currently exposes the 1-arc-second DEM under this dataset tag.
-    # The base tag is also queried because it can return retained historical
-    # products when a tile is no longer present in the current staging folder.
-    datasets = (
-        "National Elevation Dataset (NED) 1 arc-second Current",
-        "National Elevation Dataset (NED) 1 arc-second",
+    queries = (
+        {"datasets": "National Elevation Dataset (NED) 1 arc-second Current"},
+        {"datasets": "National Elevation Dataset (NED) 1 arc-second"},
+        {"q": "1 arc-second DEM"},
+        {"q": "National Elevation Dataset (NED) 1 arc-second Current"},
     )
-    query_formats = ("GeoTIFF", None)
 
-    for dataset in datasets:
-        for product_format in query_formats:
-            params = {
-                "datasets": dataset,
-                "bbox": bbox,
-                "prodExtents": "1 x 1 degree",
-            }
-            if product_format:
-                params["prodFormats"] = product_format
+    for extra in queries:
+        params = {**extra, "bbox": bbox, "prodExtents": "1 x 1 degree"}
+        try:
+            response = requests.get(USGS_TNM_API, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("errorMessage"):
+                raise RuntimeError(str(data["errorMessage"]))
+        except Exception as exc:
+            errors.append(f"{extra}: {exc}")
+            continue
 
-            try:
-                response = requests.get(
-                    USGS_TNM_API,
-                    params=params,
-                    timeout=30,
-                )
-                response.raise_for_status()
-                data = response.json()
-                if data.get("errorMessage"):
-                    raise RuntimeError(str(data["errorMessage"]))
-            except Exception as exc:
-                print(f"      TNM lookup failed ({dataset}, {product_format or 'all formats'}): {exc}")
+        for item in data.get("items", []):
+            if not isinstance(item, dict):
                 continue
-
-            found = 0
-            for item in data.get("items", []):
-                url = item.get("downloadURL")
-                if not url or url in urls:
+            title = str(item.get("title") or "").lower()
+            for url in _iter_product_urls(item):
+                lower = url.lower()
+                clean_url = lower.split("?", 1)[0]
+                if not clean_url.endswith((".tif", ".tiff", ".zip")):
                     continue
-                # Only accept the requested 1-degree 1-arc-second GeoTIFF family.
-                # TNM may return multiple products intersecting the bbox.
-                name = url.rsplit("/", 1)[-1].lower()
-                if tile in name and name.endswith((".tif", ".tiff", ".zip")):
-                    urls.append(url)
-                    found += 1
+                if url in seen:
+                    continue
+                if tile not in lower and tile not in title:
+                    continue
+                seen.add(url)
+                candidates.append((_is_current(item, url), _publication_date(item, url), url))
 
-            if found:
-                break
+    if not candidates:
+        detail = "; ".join(errors) if errors else "TNMAccess returned no matching product URLs"
+        raise RuntimeError(f"no TNMAccess product for {tile.upper()}: {detail}")
 
-        if urls:
-            break
-
-    # Prefer current products, then dated historical products. Within the
-    # historical group, newest dated products are preferred.
-    def _candidate_key(url: str):
-        lower = url.lower()
-        is_current = "/current/" in lower
-        filename = url.rsplit("/", 1)[-1]
-        stem = filename.rsplit(".", 1)[0]
-        date_suffix = ""
-        if "_" in stem:
-            maybe_date = stem.rsplit("_", 1)[-1]
-            if len(maybe_date) == 8 and maybe_date.isdigit():
-                date_suffix = maybe_date
-        date_value = int(date_suffix) if date_suffix else -1
-        return (not is_current, -date_value)
-
-    return sorted(urls, key=_candidate_key)
+    current = [entry for entry in candidates if entry[0]]
+    pool = current if current else candidates
+    pool.sort(key=lambda entry: entry[1], reverse=True)
+    return [entry[2] for entry in pool]
 
 
 def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
@@ -206,35 +168,16 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
         except Exception:
             target.unlink(missing_ok=True)
 
-    direct_url = _current_tile_url(tile_id)
     errors: list[str] = []
-    for attempt in range(1, 4):
-        try:
-            print(f"   Downloading {tile_id.upper()} from current 3DEP (attempt {attempt})...")
-            _download_url(requests, direct_url, target)
-            return target
-        except Exception as exc:
-            errors.append(f"current: {exc}")
-            # A 404 is deterministic: retrying the same missing object wastes
-            # time and delays the TNM product lookup. Other failures may be
-            # transient, so retain the short retry behavior for those.
-            if "404 Client Error" in str(exc):
-                break
-            if attempt < 3:
-                time.sleep(1.5 * attempt)
+    direct_url = _current_tile_url(tile_id)
+    try:
+        print(f"   Downloading {tile_id.upper()} from current 3DEP...")
+        _download_url(requests, direct_url, target)
+        return target
+    except Exception as exc:
+        errors.append(f"legacy current URL: {exc}")
 
-    # Resolve dated/current object names from S3 before using the TNM API.
-    # The canonical unsuffixed current filename can disappear when USGS
-    # republishes a 1-degree tile, while the actual object remains discoverable
-    # under the same tile prefix.
-    candidates = _s3_candidates(requests, lat_north, lon_west)
-    if not candidates:
-        try:
-            candidates = _tnm_candidates(requests, lat_north, lon_west)
-        except Exception as exc:
-            errors.append(f"TNM lookup: {exc}")
-            candidates = []
-
+    candidates = _tnm_candidates(requests, lat_north, lon_west)
     for url in candidates:
         try:
             print(f"      Trying TNM product: {url.rsplit('/', 1)[-1]}")
@@ -243,20 +186,17 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
         except Exception as exc:
             errors.append(f"{url}: {exc}")
 
-    detail = errors[-1] if errors else "no current or TNM product was returned"
+    detail = errors[-1] if errors else "no TNM product was returned"
     raise RuntimeError(f"Could not download USGS 3DEP tile {tile_id.upper()}: {detail}")
 
 
 def _merge_resolution(tile_paths: list[Path], max_dimension: int) -> tuple[tuple[float, float] | None, dict]:
-    """Choose native resolution for normal jobs and a bounded resolution for huge mosaics."""
     import rasterio
-
     with rasterio.open(tile_paths[0]) as first:
         xres = abs(float(first.res[0]))
         yres = abs(float(first.res[1]))
         nodata = float(first.nodata) if first.nodata is not None else -999999.0
         crs = first.crs
-
     left = float("inf")
     bottom = float("inf")
     right = float("-inf")
@@ -267,38 +207,19 @@ def _merge_resolution(tile_paths: list[Path], max_dimension: int) -> tuple[tuple
             bottom = min(bottom, src.bounds.bottom)
             right = max(right, src.bounds.right)
             top = max(top, src.bounds.top)
-
     native_width = max(1, int(math.ceil((right - left) / xres)))
     native_height = max(1, int(math.ceil((top - bottom) / yres)))
     longest = max(native_width, native_height)
     if longest <= max_dimension:
-        return None, {
-            "native_width": native_width,
-            "native_height": native_height,
-            "output_width_est": native_width,
-            "output_height_est": native_height,
-            "scale": 1.0,
-            "nodata": nodata,
-            "crs": crs,
-        }
-
+        return None, {"native_width": native_width, "native_height": native_height, "output_width_est": native_width, "output_height_est": native_height, "scale": 1.0, "nodata": nodata, "crs": crs}
     scale = longest / float(max_dimension)
     target_res = (xres * scale, yres * scale)
     output_width = max(1, int(math.ceil((right - left) / target_res[0])))
     output_height = max(1, int(math.ceil((top - bottom) / target_res[1])))
-    return target_res, {
-        "native_width": native_width,
-        "native_height": native_height,
-        "output_width_est": output_width,
-        "output_height_est": output_height,
-        "scale": scale,
-        "nodata": nodata,
-        "crs": crs,
-    }
+    return target_res, {"native_width": native_width, "native_height": native_height, "output_width_est": output_width, "output_height_est": output_height, "scale": scale, "nodata": nodata, "crs": crs}
 
 
 def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
-    """Build a memory-bounded geographic DEM using current USGS 3DEP tiles."""
     import rasterio
     from rasterio.crs import CRS
     from rasterio.merge import merge as rio_merge
@@ -308,7 +229,6 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
         dem_cache = Path(__file__).resolve().parent / dem_cache
     dem_cache.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
-
     print(f"   DEM cache: {dem_cache}")
 
     lats = [float(s["lat"]) for s in stations]
@@ -318,7 +238,6 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
     lat_max = max(lats) + margin_deg
     lon_min = min(lons) - margin_deg
     lon_max = max(lons) + margin_deg
-
     if lon_max >= 0:
         raise RuntimeError("The current DEM adapter expects western-hemisphere coordinates; generalized CRS support is still in progress.")
 
@@ -326,16 +245,11 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
     lon_w_max = math.ceil(abs(lon_min))
     lat_n_min = math.ceil(lat_min)
     lat_n_max = math.ceil(lat_max)
-    needed_tiles = [
-        (lat_n, lon_w)
-        for lat_n in range(lat_n_min, lat_n_max + 1)
-        for lon_w in range(lon_w_min, lon_w_max + 1)
-    ]
+    needed_tiles = [(lat_n, lon_w) for lat_n in range(lat_n_min, lat_n_max + 1) for lon_w in range(lon_w_min, lon_w_max + 1)]
     canonical_names = [_tile_id(lat_n, lon_w) for lat_n, lon_w in needed_tiles]
 
     dem_path = work_dir / "utah_dem.tif"
     bounds_path = work_dir / "utah_dem_bounds.json"
-
     if dem_path.exists() and bounds_path.exists():
         try:
             cached = json.loads(bounds_path.read_text(encoding="utf-8"))
@@ -349,15 +263,12 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
 
     print(f"   Region: lat {lat_min:.1f} to {lat_max:.1f}, lon {lon_min:.1f} to {lon_max:.1f}")
     print(f"   Tiles required: {len(needed_tiles)}")
-    print("   Source: USGS 3DEP 1 arc-second current GeoTIFFs")
+    print("   Source: USGS 3DEP 1 arc-second products")
 
     tile_paths: list[Path] = []
     workers = min(4, max(1, len(needed_tiles)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(_download_tile, lat_n, lon_w, dem_cache): (lat_n, lon_w)
-            for lat_n, lon_w in needed_tiles
-        }
+        futures = {pool.submit(_download_tile, lat_n, lon_w, dem_cache): (lat_n, lon_w) for lat_n, lon_w in needed_tiles}
         for future in as_completed(futures):
             tile_paths.append(future.result())
 
@@ -370,7 +281,6 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
     merge_res, merge_info = _merge_resolution(tile_paths, max_merge_dimension)
     nodata = float(merge_info["nodata"])
     source_crs = merge_info["crs"] or CRS.from_epsg(4269)
-
     native_width = int(merge_info["native_width"])
     native_height = int(merge_info["native_height"])
     output_width = int(merge_info["output_width_est"])
@@ -378,40 +288,22 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
     estimated_native_gib = native_width * native_height * 4 / (1024 ** 3)
 
     if merge_res is not None:
-        print(
-            f"   Large DEM guard: native mosaic would be {native_width}x{native_height} "
-            f"(~{estimated_native_gib:.1f} GiB float32)."
-        )
-        print(
-            f"   Merging directly to analysis-safe resolution: "
-            f"~{output_width}x{output_height} instead of materializing the full mosaic."
-        )
+        print(f"   Large DEM guard: native mosaic would be {native_width}x{native_height} (~{estimated_native_gib:.1f} GiB float32).")
+        print(f"   Merging directly to analysis-safe resolution: ~{output_width}x{output_height} instead of materializing the full mosaic.")
 
     print(f"   Merging {len(tile_paths)} tile(s) as disk-backed BigTIFF...", end=" ", flush=True)
     started = time.perf_counter()
     dem_path.unlink(missing_ok=True)
-
     merge_kwargs = {
         "nodata": nodata,
         "dtype": "float32",
         "mem_limit": 256,
         "dst_path": dem_path,
-        "dst_kwds": {
-            "driver": "GTiff",
-            "dtype": "float32",
-            "nodata": nodata,
-            "compress": "lzw",
-            "count": 1,
-            "tiled": True,
-            "blockxsize": 512,
-            "blockysize": 512,
-            "BIGTIFF": "YES",
-        },
+        "dst_kwds": {"driver": "GTiff", "dtype": "float32", "nodata": nodata, "compress": "lzw", "count": 1, "tiled": True, "blockxsize": 512, "blockysize": 512, "BIGTIFF": "YES"},
     }
     if merge_res is not None:
         merge_kwargs["res"] = merge_res
         merge_kwargs["target_aligned_pixels"] = True
-
     try:
         rio_merge(tile_paths, **merge_kwargs)
         with rasterio.open(dem_path, "r+") as dst:
@@ -424,32 +316,26 @@ def prepare_dem(stations: list, cfg: dict, work_dir: Path) -> Path:
         dem_path.unlink(missing_ok=True)
         raise
 
-    bounds_path.write_text(
-        json.dumps(
-            {
-                "tiles": sorted(canonical_names),
-                "tiles_found": sorted(p.name for p in tile_paths),
-                "lat_min": lat_min,
-                "lat_max": lat_max,
-                "lon_min": lon_min,
-                "lon_max": lon_max,
-                "nodata": nodata,
-                "crs": str(actual_crs),
-                "resolution_arcsec": 1.0 if merge_res is None else None,
-                "source": "USGS 3DEP current",
-                "bigtiff": True,
-                "disk_backed_merge": True,
-                "merge_mem_limit_mb": 256,
-                "native_estimated_width": native_width,
-                "native_estimated_height": native_height,
-                "output_width": actual_width,
-                "output_height": actual_height,
-                "adaptive_resolution": merge_res is not None,
-                "resolution_scale": float(merge_info["scale"]),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    bounds_path.write_text(json.dumps({
+        "tiles": sorted(canonical_names),
+        "tiles_found": sorted(p.name for p in tile_paths),
+        "lat_min": lat_min,
+        "lat_max": lat_max,
+        "lon_min": lon_min,
+        "lon_max": lon_max,
+        "nodata": nodata,
+        "crs": str(actual_crs),
+        "resolution_arcsec": 1.0 if merge_res is None else None,
+        "source": "USGS 3DEP",
+        "bigtiff": True,
+        "disk_backed_merge": True,
+        "merge_mem_limit_mb": 256,
+        "native_estimated_width": native_width,
+        "native_estimated_height": native_height,
+        "output_width": actual_width,
+        "output_height": actual_height,
+        "adaptive_resolution": merge_res is not None,
+        "resolution_scale": float(merge_info["scale"]),
+    }, indent=2), encoding="utf-8")
     print(f"done ({actual_width}x{actual_height}, {dem_path.stat().st_size / 1e6:.0f} MB, {time.perf_counter() - started:.1f}s)")
     return dem_path
