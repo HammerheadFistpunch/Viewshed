@@ -14,6 +14,10 @@ USGS_TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 USGS_3DEP_CURRENT = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1/TIFF/current"
 
 
+class NoDemProductError(RuntimeError):
+    """Raised when TNM successfully confirms that no DEM product exists for a tile."""
+
+
 def _tile_id(lat_north: int, lon_west: int) -> str:
     south = lat_north - 1
     return f"n{south:02d}w{lon_west:03d}"
@@ -128,7 +132,7 @@ def _candidate_key(url: str) -> str:
 
 
 def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
-    """Discover usable 1-arc-second products for a Signal Peak tile.
+    """Discover usable 1-arc-second products for one CONUS tile.
 
     TNMAccess is a product catalog, not a guaranteed tile-name index. The
     bbox-scoped NED queries are authoritative for spatial/product selection;
@@ -143,6 +147,7 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     candidates: list[tuple[bool, str, str]] = []
     seen: set[str] = set()
     errors: list[str] = []
+    successful_queries = False
 
     queries = (
         ({"datasets": "National Elevation Dataset (NED) 1 arc-second Current"}, False),
@@ -159,6 +164,7 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
             data = response.json()
             if data.get("errorMessage"):
                 raise RuntimeError(str(data["errorMessage"]))
+            successful_queries = True
         except Exception as exc:
             errors.append(f"{extra}: {exc}")
             continue
@@ -190,6 +196,10 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
                     candidates.insert(0, (True, _publication_date(item, current_url), current_url))
 
     if not candidates:
+        if successful_queries:
+            raise NoDemProductError(
+                f"no TNMAccess product for {tile.upper()}: TNMAccess returned no matching product URLs"
+            )
         detail = "; ".join(errors) if errors else "TNMAccess returned no matching product URLs"
         raise RuntimeError(f"no TNMAccess product for {tile.upper()}: {detail}")
 
@@ -198,6 +208,51 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     current.sort(key=lambda entry: entry[1], reverse=True)
     historical.sort(key=lambda entry: entry[1], reverse=True)
     return [entry[2] for entry in current + historical]
+
+
+def _create_nodata_tile(lat_north: int, lon_west: int, target: Path) -> Path:
+    """Create a 1-degree, 1-arc-second nodata tile when USGS has no product."""
+    import numpy as np
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.transform import from_origin
+
+    nodata = -999999.0
+    resolution = 1.0 / 3600.0
+    west = -float(lon_west)
+    north = float(lat_north)
+    width = 3601
+    height = 3601
+
+    print(
+        f"      No 3DEP product for {target.stem.replace('USGS_1_', '').upper()}; "
+        "using a nodata tile (no terrestrial DEM coverage)."
+    )
+    target.unlink(missing_ok=True)
+    profile = {
+        "driver": "GTiff",
+        "width": width,
+        "height": height,
+        "count": 1,
+        "dtype": "float32",
+        "crs": CRS.from_epsg(4269),
+        "transform": from_origin(west, north, resolution, resolution),
+        "nodata": nodata,
+        "compress": "lzw",
+        "tiled": True,
+        "blockxsize": 512,
+        "blockysize": 512,
+        "BIGTIFF": "IF_SAFER",
+    }
+    block = np.full((512, 512), nodata, dtype=np.float32)
+    with rasterio.open(target, "w", **profile) as dst:
+        for row in range(0, height, 512):
+            rows = min(512, height - row)
+            for col in range(0, width, 512):
+                cols = min(512, width - col)
+                dst.write(block[:rows, :cols], 1, window=((row, row + rows), (col, col + cols)))
+    _validate_tif(target)
+    return target
 
 
 def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
@@ -221,7 +276,11 @@ def _download_tile(lat_north: int, lon_west: int, dem_cache: Path) -> Path:
     except Exception as exc:
         errors.append(f"legacy current URL: {exc}")
 
-    candidates = _tnm_candidates(requests, lat_north, lon_west)
+    try:
+        candidates = _tnm_candidates(requests, lat_north, lon_west)
+    except NoDemProductError:
+        return _create_nodata_tile(lat_north, lon_west, target)
+
     for url in candidates:
         try:
             source_kind = "current" if "/current/" in url.lower() else "historical fallback"
