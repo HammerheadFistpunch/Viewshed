@@ -130,10 +130,9 @@ def _candidate_key(url: str) -> str:
 def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     """Discover usable 1-arc-second products for a Signal Peak tile.
 
-    TNMAccess product records can lag the live S3 layout and may expose a
-    historical URL even when the corresponding current object is available.
-    Treat the API result as product discovery, then test the current object
-    derived from that record before falling back to the historical file.
+    TNMAccess is a product catalog, not a guaranteed tile-name index. The
+    bbox-scoped NED queries are authoritative for spatial/product selection;
+    free-text fallback queries still require the tile identifier.
     """
     south = lat_north - 1
     west = -float(lon_west)
@@ -146,13 +145,13 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
     errors: list[str] = []
 
     queries = (
-        {"datasets": "National Elevation Dataset (NED) 1 arc-second Current"},
-        {"datasets": "National Elevation Dataset (NED) 1 arc-second"},
-        {"q": "1 arc-second DEM"},
-        {"q": f"USGS 1 Arc Second {tile}"},
+        ({"datasets": "National Elevation Dataset (NED) 1 arc-second Current"}, False),
+        ({"datasets": "National Elevation Dataset (NED) 1 arc-second"}, False),
+        ({"q": "1 arc-second DEM"}, True),
+        ({"q": f"USGS 1 Arc Second {tile}"}, True),
     )
 
-    for extra in queries:
+    for extra, require_tile_match in queries:
         params = {**extra, "bbox": bbox, "prodFormats": "GeoTIFF", "max": 50}
         try:
             response = requests.get(USGS_TNM_API, params=params, timeout=30)
@@ -176,7 +175,9 @@ def _tnm_candidates(requests, lat_north: int, lon_west: int) -> list[str]:
                     continue
                 if _candidate_key(url) in seen:
                     continue
-                if tile not in lower and tile not in title and tile not in text:
+                if require_tile_match and tile not in lower and tile not in title and tile not in text:
+                    continue
+                if require_tile_match and not any(term in text for term in ("elevation", "ned", "3dep")):
                     continue
                 seen.add(_candidate_key(url))
                 candidates.append((_is_current(item, url), _publication_date(item, url), url))
