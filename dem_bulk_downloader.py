@@ -2,10 +2,9 @@
 """Bulk-download USGS 3DEP DEM tiles for a local offline archive.
 
 This utility is intentionally separate from Signal Peak's runtime DEM code.
-It uses the TNMAccess API to discover current 1-degree GeoTIFF products and
+It uses the TNMAccess API to discover actual 1-degree GeoTIFF products and
 then downloads them with retry-safe .part files. The resulting archive can be
-wired into Signal Peak later without making the application depend on live
-USGS URLs.
+wired into Signal Peak later without making the application depend on live USGS URLs.
 """
 
 from __future__ import annotations
@@ -26,12 +25,12 @@ import requests
 
 
 TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
-DEFAULT_BBOX = (-125.0, 24.0, -66.0, 50.0)  # CONUS bounding box; includes fringe tiles.
+DEFAULT_BBOX = (-125.0, 24.0, -66.0, 50.0)
 
 RESOLUTIONS = {
     "1": {
         "directory": "1arcsec",
-        "prefix": "USGS_1_",
+        "dataset": "National Elevation Dataset (NED) 1 arc-second",
         "queries": (
             "1 arc-second DEM",
             "National Elevation Dataset (NED) 1 arc-second Current",
@@ -39,14 +38,13 @@ RESOLUTIONS = {
     },
     "1/3": {
         "directory": "1_3arcsec",
-        "prefix": "USGS_13_",
+        "dataset": "National Elevation Dataset (NED) 1/3 arc-second",
         "queries": (
             "1/3 arc-second DEM",
             "National Elevation Dataset (NED) 1/3 arc-second Current",
         ),
     },
 }
-
 
 _print_lock = threading.Lock()
 
@@ -90,34 +88,58 @@ def parse_bbox(value: str) -> tuple[float, float, float, float]:
 
 def make_session() -> requests.Session:
     session = requests.Session()
-    session.headers.update({"User-Agent": "SignalPeak-DEM-Archive/1.0"})
+    session.headers.update({"User-Agent": "SignalPeak-DEM-Archive/1.1"})
     return session
 
 
-def product_url(item: dict[str, Any]) -> str | None:
-    url = item.get("downloadURL")
-    if isinstance(url, str) and url:
-        return url
+def iter_product_urls(item: dict[str, Any]):
+    """Yield every download URL exposed by a TNMAccess product record."""
+    seen: set[str] = set()
+    direct = item.get("downloadURL")
+    if isinstance(direct, str) and direct and direct not in seen:
+        seen.add(direct)
+        yield direct
     files = item.get("files")
     if isinstance(files, list):
         for entry in files:
-            if isinstance(entry, dict):
-                candidate = entry.get("downloadURL") or entry.get("url")
-                if isinstance(candidate, str) and candidate:
-                    return candidate
-    return None
+            if not isinstance(entry, dict):
+                continue
+            for key in ("downloadURL", "url", "downloadUrl"):
+                candidate = entry.get(key)
+                if isinstance(candidate, str) and candidate and candidate not in seen:
+                    seen.add(candidate)
+                    yield candidate
 
 
-def matches_tile(url: str, tile: str, prefix: str) -> bool:
-    name = url.rsplit("/", 1)[-1].lower()
-    return tile.lower() in name and name.startswith(prefix.lower()) and name.endswith(
-        (".tif", ".tiff", ".zip")
-    )
+def extract_tile_token(value: str) -> str | None:
+    """Return a 1-degree tile token found anywhere in a URL/title."""
+    import re
+
+    match = re.search(r"(?:^|[^a-z])([ns]\d{2}[ew]\d{3})(?:[^a-z]|$)", value.lower())
+    return match.group(1) if match else None
 
 
-def is_current_url(url: str) -> bool:
+def is_dem_file(url: str) -> bool:
+    return url.lower().split("?", 1)[0].endswith((".tif", ".tiff", ".zip"))
+
+
+def is_current_product(item: dict[str, Any], url: str) -> bool:
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "name", "description", "dataset", "dateCreated")
+    ).lower()
     lower = url.lower()
-    return "/current/" in lower or "current" in lower.rsplit("/", 2)[-2:]
+    return "/current/" in lower or " current" in text or text.endswith("current")
+
+
+def publication_key(item: dict[str, Any], url: str) -> str:
+    value = item.get("publicationDate") or item.get("dateCreated") or ""
+    if value:
+        return str(value)
+    import re
+
+    match = re.search(r"_(\d{8})(?:\.|$)", url.rsplit("/", 1)[-1])
+    return match.group(1) if match else ""
 
 
 def discover_tile(
@@ -130,14 +152,20 @@ def discover_tile(
     spec = RESOLUTIONS[resolution]
     tile = tile_name(lat, lon)
     bbox = f"{lon},{lat},{lon + 1},{lat + 1}"
-    errors: list[str] = []
     candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    seen: set[str] = set()
 
+    requests_to_try: list[dict[str, Any]] = []
     for query in spec["queries"]:
+        requests_to_try.append({"q": query})
+    requests_to_try.append({"datasets": spec["dataset"]})
+    requests_to_try.append({"datasets": spec["dataset"], "q": "current"})
+
+    for extra in requests_to_try:
         params = {
-            "q": query,
+            **extra,
             "bbox": bbox,
-            "prodFormats": "GeoTIFF",
             "prodExtents": "1 x 1 degree",
         }
         try:
@@ -147,41 +175,52 @@ def discover_tile(
             if data.get("errorMessage"):
                 raise RuntimeError(str(data["errorMessage"]))
         except Exception as exc:
-            errors.append(f"{query}: {exc}")
+            errors.append(f"{extra}: {exc}")
             continue
 
         for item in data.get("items", []):
             if not isinstance(item, dict):
                 continue
-            url = product_url(item)
-            if not url or not matches_tile(url, tile, spec["prefix"]):
-                continue
-            candidates.append(
-                {
-                    "url": url,
-                    "title": item.get("title"),
-                    "published": item.get("publicationDate") or item.get("dateCreated"),
-                    "format": item.get("format") or "GeoTIFF",
-                    "source_query": query,
-                }
-            )
-        if candidates:
-            break
+            item_tile = extract_tile_token(str(item.get("title") or ""))
+            for url in iter_product_urls(item):
+                if url in seen or not is_dem_file(url):
+                    continue
+                if tile not in url.lower() and item_tile != tile.lower():
+                    continue
+                seen.add(url)
+                candidates.append(
+                    {
+                        "url": url,
+                        "title": item.get("title"),
+                        "published": publication_key(item, url),
+                        "format": item.get("format") or "GeoTIFF",
+                        "source_query": extra,
+                        "product_current": is_current_product(item, url),
+                    }
+                )
 
     if not candidates:
-        detail = "; ".join(errors) if errors else "no matching current product returned"
+        detail = "; ".join(errors) if errors else "TNMAccess returned no matching product URLs"
         raise RuntimeError(f"{tile.upper()} discovery failed: {detail}")
 
-    # Prefer URLs explicitly staged under /current/. Within that group, prefer
-    # the newest publication date returned by TNMAccess.
+    # Never silently downgrade to historical if TNMAccess returned a current
+    # product. If no current product exists, use the newest dated product.
     candidates.sort(
         key=lambda item: (
-            not is_current_url(item["url"]),
-            str(item.get("published") or ""),
+            not item["product_current"],
+            item["published"],
         ),
         reverse=False,
     )
-    chosen = candidates[0]
+    current = [item for item in candidates if item["product_current"]]
+    if current:
+        current.sort(key=lambda item: item["published"], reverse=True)
+        chosen = current[0]
+    else:
+        candidates.sort(key=lambda item: item["published"], reverse=True)
+        chosen = candidates[0]
+        chosen["fallback_historical"] = True
+
     chosen["tile"] = tile
     chosen["resolution"] = resolution
     return chosen
@@ -242,14 +281,14 @@ def download_file(
 
 def load_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"version": 1, "tiles": {}}
+        return {"version": 2, "tiles": {}}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict) and isinstance(data.get("tiles"), dict):
             return data
     except Exception:
         pass
-    return {"version": 1, "tiles": {}}
+    return {"version": 2, "tiles": {}}
 
 
 def save_manifest(path: Path, manifest: dict[str, Any]) -> None:
@@ -260,41 +299,17 @@ def save_manifest(path: Path, manifest: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Bulk-download current USGS 3DEP 1 arc-second and/or 1/3 arc-second DEM tiles."
+        description="Bulk-download USGS 3DEP 1 arc-second and/or 1/3 arc-second DEM tiles."
     )
-    parser.add_argument(
-        "--resolution",
-        choices=("1", "1/3", "both"),
-        default="1",
-        help="DEM resolution to archive (default: 1 arc-second)",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("DEM_Archive"),
-        help="archive root directory (default: DEM_Archive)",
-    )
-    parser.add_argument(
-        "--bbox",
-        type=parse_bbox,
-        default=DEFAULT_BBOX,
-        metavar="W,S,E,N",
-        help="download grid cells intersecting this bbox (default: CONUS bbox -125,24,-66,50)",
-    )
-    parser.add_argument("--workers", type=int, default=6, help="parallel API/download workers (default: 6)")
-    parser.add_argument("--api-timeout", type=int, default=45, help="TNM API timeout in seconds")
-    parser.add_argument("--download-timeout", type=int, default=180, help="file download timeout in seconds")
-    parser.add_argument("--retries", type=int, default=3, help="download retries per tile (default: 3)")
-    parser.add_argument(
-        "--discover-only",
-        action="store_true",
-        help="query TNMAccess and write the manifest without downloading files",
-    )
-    parser.add_argument(
-        "--refresh",
-        action="store_true",
-        help="rediscover URLs even when the manifest already contains a tile",
-    )
+    parser.add_argument("--resolution", choices=("1", "1/3", "both"), default="1")
+    parser.add_argument("--output", type=Path, default=Path("DEM_Archive"))
+    parser.add_argument("--bbox", type=parse_bbox, default=DEFAULT_BBOX, metavar="W,S,E,N")
+    parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--api-timeout", type=int, default=45)
+    parser.add_argument("--download-timeout", type=int, default=180)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--discover-only", action="store_true")
+    parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args()
 
     if args.workers < 1 or args.retries < 1:
@@ -310,7 +325,7 @@ def main() -> int:
     manifest = load_manifest(manifest_path)
     manifest.update(
         {
-            "version": 1,
+            "version": 2,
             "source": "USGS 3DEP / TNMAccess",
             "bbox": list(args.bbox),
             "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -351,7 +366,7 @@ def main() -> int:
         if args.discover_only:
             return key, item
         spec = RESOLUTIONS[resolution]
-        name = item["url"].rsplit("/", 1)[-1]
+        name = item["url"].split("?", 1)[0].rsplit("/", 1)[-1]
         target = args.output / spec["directory"] / name
         result = download_file(session(), item, target, args.download_timeout, args.retries)
         return key, result
@@ -368,7 +383,8 @@ def main() -> int:
                 manifest["tiles"][key] = result
                 completed += 1
                 action = "discovered" if args.discover_only else ("skipped" if result.get("skipped") else "downloaded")
-                log(f"[{completed}/{len(work)}] {resolution} {key.split(':', 1)[1].upper()} {action}")
+                status = "historical fallback" if result.get("fallback_historical") else action
+                log(f"[{completed}/{len(work)}] {resolution} {key.split(':', 1)[1].upper()} {status}")
             except Exception as exc:
                 label = f"{resolution} {tile_name(lat, lon).upper()}"
                 failures.append(f"{label}: {exc}")
