@@ -8,6 +8,7 @@ for package in ("itmlogic", "rasterio", "scipy", "pyproj", "PIL", "tkintermapvie
 
 datas = [
     ("LICENSE", "."),
+    ("VERSION", "."),
     ("assets/signal-peak-icon.svg", "assets"),
     ("assets/signal-peak-icon.png", "assets"),
     ("utah_stations_scraped.json", "."),
@@ -31,12 +32,13 @@ datas = [
     ("docs/RELEASE_NOTES_2.0.0.md", "docs"),
     ("docs/RELEASE_NOTES_2.0.1.md", "docs"),
     ("docs/RELEASE_NOTES_2.1.0.md", "docs"),
+    ("docs/RELEASE_NOTES_2.2.0.md", "docs"),
     ("docs/SPECIAL_CONSIDERATIONS.md", "docs"),
 ]
 datas += collect_data_files("rasterio")
 
 a = Analysis(
-    ["viewshed_app.py"],
+    ["release_entrypoint.py"],
     pathex=[],
     binaries=[],
     datas=datas,
