@@ -16,9 +16,9 @@ ViewshedData/jobs/<timestamp>/output/
 
 The UI provides **Open Output Folder**, **Open KMZ**, and **Open GeoTIFF** after a successful run.
 
-## Output architecture in 2.1.0
+## Output architecture
 
-Signal Peak 2.1.0 separates station metadata from coverage visualization. Station pins no longer imply that per-station coverage overlays must also be exported.
+Signal Peak 2.1.0 introduced the current output architecture, separating station metadata from coverage visualization. Station pins no longer imply that per-station coverage overlays must also be exported.
 
 The Output tab provides presets plus independent layer selection for:
 
@@ -39,7 +39,7 @@ The color scale is stepped in configurable dB bands. `0 dB` is the modeled opera
 
 ## Per-station heat maps
 
-Individual station heat maps now use the same stepped remaining-link-margin palette as the composite heat map. The older station-specific monochrome color scheme is retired.
+Individual station heat maps use the same stepped remaining-link-margin palette as the composite heat map. The older station-specific monochrome color scheme is retired.
 
 Per-station heat maps are independent from station pins/metadata and can be omitted without removing the station markers.
 
@@ -79,7 +79,7 @@ Styling changes presentation only. They do not change terrain, ITM, path-loss, o
 
 ## KMZ organization
 
-KMZ output separates stations from coverage products. A typical 2.1.0 structure is:
+KMZ output separates stations from coverage products. The current structure is:
 
 ```text
 Signal Peak Analysis
@@ -106,6 +106,10 @@ The work/output data can also include:
 - `inverse_coverage.png` — gap/dead-zone mask
 - `coverage_redundancy.png` — redundancy classes
 - per-station viewshed rasters
+
+## DEM archive tooling
+
+Signal Peak 2.2.0 also includes a documented bulk DEM workflow for building reusable offline USGS 3DEP terrain archives. This archive workflow is separate from the normal per-run DEM cache and does not change the propagation output format.
 
 ## Hard circular edges
 
