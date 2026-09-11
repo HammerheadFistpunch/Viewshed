@@ -1,8 +1,10 @@
-# Signal Peak 2.1.0
+# Signal Peak 2.2.0
 
 **Signal Peak** is a portable APRS/VHF terrain-propagation analysis application with a map-first Windows desktop workflow. Area, Station, and Custom modes use the same terrain-profile, Longley-Rice/ITM, path-loss, and link-margin foundation.
 
-Version 2.1.0 adds a redesigned output architecture with independently selectable station pins and coverage layers, unified composite/per-station heat-map styling, positive coverage, coverage gaps, redundancy mapping, configurable colors, and more reliable Corrections behavior. It also makes the Resources model the sole user-facing controller for DEM sizing and worker planning.
+Version 2.2.0 improves USGS 3DEP / TNMAccess DEM reliability and adds a packaged bulk DEM workflow for building reusable offline terrain archives. Exact bbox-scoped NED queries are treated as authoritative, broader discovery remains tile-filtered, and the bulk downloader supports resume-safe downloads, configurable resolution/bbox/output, workers, timeouts, retries, discovery-only mode, and refresh mode.
+
+Version 2.1.0 added a redesigned output architecture with independently selectable station pins and coverage layers, unified composite/per-station heat-map styling, positive coverage, coverage gaps, redundancy mapping, configurable colors, and more reliable Corrections behavior. It also made the Resources model the sole user-facing controller for DEM sizing and worker planning.
 
 Version 2.0 introduced resource-aware terrain-detail planning, automatic worker limits based on available RAM/CPU, resolution-aware DEM caching, and stricter Area scoping. Version 1.2 added persistent per-station RF overrides, the Station Data editor, and Metric/Imperial input/display selection.
 
@@ -14,6 +16,7 @@ Signal Peak is free and open-source software licensed under the **GNU General Pu
 
 - [Quick Start](docs/QUICK_START.md)
 - [User Guide](docs/USER_GUIDE.md)
+- [2.2.0 Release Notes](docs/RELEASE_NOTES_2.2.0.md)
 - [2.1.0 Release Notes](docs/RELEASE_NOTES_2.1.0.md)
 - [2.0.1 Release Notes](docs/RELEASE_NOTES_2.0.1.md)
 - [Propagation Model](docs/PROPAGATION_MODEL.md)
@@ -134,7 +137,7 @@ The resulting executable is `dist/SignalPeak.exe`. A packaged smoke test is avai
 SignalPeak.exe --self-test
 ```
 
-GitHub Actions builds and smoke-tests the Windows executable and uploads the `Signal-Peak-Windows-2.1.0` artifact for the 2.1 development branch.
+The release version is stored in `VERSION`. GitHub Actions reads that value, packages it with the executable, and names the downloadable artifact `Signal-Peak-Windows-2.2.0` for the current release.
 
 ## Modeling caution
 
