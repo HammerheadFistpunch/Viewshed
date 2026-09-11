@@ -1,6 +1,6 @@
 # Signal Peak Quick Start
 
-This is the shortest path from launching Signal Peak 2.1.0 to producing a coverage result.
+This is the shortest path from launching Signal Peak 2.2.0 to producing a coverage result.
 
 ## 1. Launch Signal Peak
 
