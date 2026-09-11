@@ -1,56 +1,87 @@
 # USGS 3DEP bulk DEM archive
 
-`dem_bulk_downloader.py` is a standalone utility for building an offline archive of the current USGS 3DEP DEM tiles used by Signal Peak. It is intentionally separate from the application's runtime DEM acquisition code so the archive can be created once and wired into the application later.
+`dem_bulk_downloader.py` is a standalone utility for building an offline archive of the USGS 3DEP DEM tiles used by Signal Peak. It uses TNMAccess to discover actual products and supports both 1 arc-second and 1/3 arc-second DEMs.
 
-USGS distributes the 1 arc-second (~30 m) and 1/3 arc-second (~10 m) seamless DEM products as 1-degree GeoTIFF tiles. The TNMAccess API is used to discover the actual current download URL instead of constructing legacy S3 paths. USGS documents TNMAccess as the API for downloadable National Map products, and both DEM products are publicly available. citeturn0search1turn0search2turn0search5
+## Easiest Windows workflow
 
-## Install
+You do not need to use IDLE or enter command-line arguments manually.
 
-The downloader uses `requests`, which is already a Signal Peak dependency:
+1. Edit `dem_bulk_config.json` with Notepad.
+2. Set the resolution, geographic bounding box, worker count, and **output directory**.
+3. Double-click `run_dem_bulk.bat`.
+4. The downloader opens a normal console window and resumes an existing archive automatically.
 
-```text
-python -m pip install -r requirements.txt
+Example configuration:
+
+```json
+{
+  "resolution": "1",
+  "output": "D:/DEM_Archive",
+  "bbox": [-125.0, 24.0, -66.0, 50.0],
+  "workers": 6,
+  "api_timeout": 45,
+  "download_timeout": 180,
+  "retries": 3,
+  "discover_only": false,
+  "refresh": false
+}
 ```
 
-## Recommended backup
+### Configuration fields
 
-For a full CONUS snapshot, start with the default bounding box:
+- `resolution`: `"1"`, `"1/3"`, or `"both"`
+- `output`: destination directory for the archive; Windows paths may use `D:/DEM_Archive` or `D:\\DEM_Archive`
+- `bbox`: `[west, south, east, north]` in decimal degrees
+- `workers`: simultaneous discovery/download workers; `6` is a conservative default
+- `api_timeout`: TNMAccess request timeout in seconds
+- `download_timeout`: individual DEM download timeout in seconds
+- `retries`: number of attempts for a failed download
+- `discover_only`: `true` to query the inventory without downloading files
+- `refresh`: `true` to rediscover tiles even when the manifest already has them
 
-```text
--125,24,-66,50
-```
+The launcher translates these JSON settings into the downloader's normal command-line arguments, so the downloader itself remains usable from a terminal as before.
 
-This is a rectangular CONUS bounding box, so it intentionally includes some fringe ocean, Canada, and Mexico 1-degree cells. That is simpler and safer than trying to maintain a separate state-boundary mask. The resulting extra tiles can be deleted later if desired.
+## Command-line workflow
+
+If you prefer a terminal, the downloader still supports direct arguments.
 
 ### 1 arc-second only
 
-```bash
+```text
 python dem_bulk_downloader.py --resolution 1 --output DEM_Archive
 ```
 
 ### 1/3 arc-second only
 
-```bash
+```text
 python dem_bulk_downloader.py --resolution 1/3 --output DEM_Archive
 ```
 
 ### Both resolutions
 
-```bash
+```text
 python dem_bulk_downloader.py --resolution both --output DEM_Archive
 ```
 
-For the first run, I recommend keeping the default `--workers 6`. The downloader is intentionally conservative because this is a large public-data transfer rather than a latency-sensitive application operation.
+### Test the inventory first
 
-## Test the inventory first
-
-Before committing to a large download, query TNMAccess without downloading files:
-
-```bash
+```text
 python dem_bulk_downloader.py --resolution 1 --discover-only --output DEM_Archive
 ```
 
-Then inspect `DEM_Archive/manifest.json`. Repeat with `--resolution 1/3` if desired.
+## Geographic extent
+
+The default CONUS bounding box is:
+
+```text
+-125,24,-66,50
+```
+
+This rectangular extent intentionally includes some fringe ocean, Canada, and Mexico 1-degree cells. A smaller regional bbox can be entered in `dem_bulk_config.json` when a full CONUS archive is not wanted.
+
+## Current-product selection
+
+The downloader now follows the same TNMAccess selection logic as Signal Peak's runtime DEM acquisition. Exact bbox-scoped NED queries are used for spatial/product selection rather than requiring the tile identifier to appear in the product URL. If TNMAccess exposes a historical URL, the downloader derives and tries the corresponding current object first, then retains the historical product as a fallback.
 
 ## Resume behavior
 
@@ -60,45 +91,6 @@ The downloader is safe to rerun:
 - Failed downloads are removed and retried.
 - Downloads use temporary `.part` files and are renamed only after completion.
 - `manifest.json` records the TNM URL, product metadata, relative file path, size, and SHA-256 for downloaded files.
-- A rerun discovers only missing/unrecorded tiles unless `--refresh` is specified.
+- A rerun processes only missing/unrecorded tiles unless `refresh` is enabled.
 
-To refresh TNM product discovery while retaining existing files:
-
-```bash
-python dem_bulk_downloader.py --resolution 1 --refresh --output DEM_Archive
-```
-
-## Archive layout
-
-A completed archive looks approximately like:
-
-```text
-DEM_Archive/
-├── 1arcsec/
-│   ├── USGS_1_n35w112.tif
-│   ├── USGS_1_n35w113.tif
-│   └── ...
-├── 1_3arcsec/
-│   ├── USGS_13_n35w112.tif
-│   ├── USGS_13_n35w113.tif
-│   └── ...
-└── manifest.json
-```
-
-USGS notes that current and historical DEM products are pre-staged as 1-degree GeoTIFFs, and updated current tiles can replace earlier versions. For a backup, keep this archive as a frozen snapshot rather than continually overwriting it. citeturn0search12turn0search6
-
-## Important: current snapshot vs. historical library
-
-The downloader intentionally targets the **current** product set. It does not attempt to mirror every historical USGS revision. That is the useful backup for Signal Peak: one known-good, internally consistent terrain snapshot that can be kept offline.
-
-If a specific tile is later replaced by USGS, the archive remains unchanged unless you explicitly rerun with `--refresh` and replace the stored file.
-
-## Storage planning
-
-The 1/3 arc-second dataset is substantially larger than 1 arc-second. USGS describes 1 arc-second as approximately 30 m ground spacing and 1/3 arc-second as approximately 10 m. citeturn0search5
-
-For that reason, a practical approach is:
-
-1. Archive **1 arc-second** first as the primary emergency backup.
-2. Add **1/3 arc-second** if you have sufficient disk space and want a higher-detail offline source.
-3. Keep the two resolutions in separate directories so the eventual Signal Peak integration can choose between them without ambiguity.
+The archive is intended to be a frozen offline snapshot. If USGS later replaces a current tile, use `refresh` deliberately rather than overwriting the archive accidentally.

@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -88,33 +89,52 @@ def parse_bbox(value: str) -> tuple[float, float, float, float]:
 
 def make_session() -> requests.Session:
     session = requests.Session()
-    session.headers.update({"User-Agent": "SignalPeak-DEM-Archive/1.1"})
+    session.headers.update({"User-Agent": "SignalPeak-DEM-Archive/2.1"})
     return session
 
 
 def iter_product_urls(item: dict[str, Any]):
     """Yield every download URL exposed by a TNMAccess product record."""
     seen: set[str] = set()
-    direct = item.get("downloadURL")
-    if isinstance(direct, str) and direct and direct not in seen:
-        seen.add(direct)
-        yield direct
+
+    def add(value):
+        if isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            return value
+        return None
+
+    for key in ("downloadURL", "downloadUrl", "url"):
+        value = add(item.get(key))
+        if value:
+            yield value
+
     files = item.get("files")
     if isinstance(files, list):
         for entry in files:
             if not isinstance(entry, dict):
                 continue
-            for key in ("downloadURL", "url", "downloadUrl"):
-                candidate = entry.get(key)
-                if isinstance(candidate, str) and candidate and candidate not in seen:
-                    seen.add(candidate)
-                    yield candidate
+            for key in ("downloadURL", "downloadUrl", "url"):
+                value = add(entry.get(key))
+                if value:
+                    yield value
+
+    urls_obj = item.get("urls")
+    if isinstance(urls_obj, dict):
+        for value in urls_obj.values():
+            value = add(value)
+            if value:
+                yield value
+
+
+def item_text(item: dict[str, Any]) -> str:
+    return " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "name", "description", "dataset", "datasetName", "sourceName")
+    ).lower()
 
 
 def extract_tile_token(value: str) -> str | None:
     """Return a 1-degree tile token found anywhere in a URL/title."""
-    import re
-
     match = re.search(r"(?:^|[^a-z])([ns]\d{2}[ew]\d{3})(?:[^a-z]|$)", value.lower())
     return match.group(1) if match else None
 
@@ -124,22 +144,34 @@ def is_dem_file(url: str) -> bool:
 
 
 def is_current_product(item: dict[str, Any], url: str) -> bool:
-    text = " ".join(
-        str(item.get(key) or "")
-        for key in ("title", "name", "description", "dataset", "dateCreated")
-    ).lower()
+    text = item_text(item)
     lower = url.lower()
     return "/current/" in lower or " current" in text or text.endswith("current")
 
 
 def publication_key(item: dict[str, Any], url: str) -> str:
-    value = item.get("publicationDate") or item.get("dateCreated") or ""
+    value = item.get("publicationDate") or item.get("dateCreated") or item.get("date") or ""
     if value:
         return str(value)
-    import re
-
     match = re.search(r"_(\d{8})(?:\.|$)", url.rsplit("/", 1)[-1])
     return match.group(1) if match else ""
+
+
+def current_from_historical(url: str) -> str | None:
+    """Convert a TNM historical URL to the corresponding current object URL."""
+    if "/historical/" not in url.lower():
+        return None
+    current = url.replace("/historical/", "/current/")
+    return re.sub(
+        r"_(\d{8})(?=\.(?:tif|tiff|zip)(?:$|\?))",
+        "",
+        current,
+        flags=re.IGNORECASE,
+    )
+
+
+def candidate_key(url: str) -> str:
+    return url.split("?", 1)[0].lower()
 
 
 def discover_tile(
@@ -149,6 +181,13 @@ def discover_tile(
     resolution: str,
     timeout: int,
 ) -> dict[str, Any]:
+    """Discover usable 1-degree DEM products for a tile.
+
+    The exact bbox-scoped NED queries are authoritative for spatial/product
+    selection. Tile-name matching is only required for broad free-text queries.
+    If TNMAccess exposes a historical URL, the corresponding current object is
+    tried first before using the historical file.
+    """
     spec = RESOLUTIONS[resolution]
     tile = tile_name(lat, lon)
     bbox = f"{lon},{lat},{lon + 1},{lat + 1}"
@@ -156,17 +195,18 @@ def discover_tile(
     errors: list[str] = []
     seen: set[str] = set()
 
-    requests_to_try: list[dict[str, Any]] = []
-    for query in spec["queries"]:
-        requests_to_try.append({"q": query})
-    requests_to_try.append({"datasets": spec["dataset"]})
-    requests_to_try.append({"datasets": spec["dataset"], "q": "current"})
+    requests_to_try: list[tuple[dict[str, Any], bool]] = [
+        ({"datasets": spec["dataset"]}, False),
+        ({"q": "1 arc-second DEM" if resolution == "1" else "1/3 arc-second DEM"}, True),
+        ({"q": f"USGS 1 Arc Second {tile}" if resolution == "1" else f"USGS 1/3 Arc Second {tile}"}, True),
+    ]
 
-    for extra in requests_to_try:
+    for extra, require_tile_match in requests_to_try:
         params = {
             **extra,
             "bbox": bbox,
-            "prodExtents": "1 x 1 degree",
+            "prodFormats": "GeoTIFF",
+            "max": 50,
         }
         try:
             response = session.get(TNM_API, params=params, timeout=timeout)
@@ -181,44 +221,52 @@ def discover_tile(
         for item in data.get("items", []):
             if not isinstance(item, dict):
                 continue
-            item_tile = extract_tile_token(str(item.get("title") or ""))
+            text = item_text(item)
+            title = str(item.get("title") or "").lower()
             for url in iter_product_urls(item):
-                if url in seen or not is_dem_file(url):
+                clean = url.lower().split("?", 1)[0]
+                if not clean.endswith((".tif", ".tiff", ".zip")):
                     continue
-                if tile not in url.lower() and item_tile != tile.lower():
+                if candidate_key(url) in seen:
                     continue
-                seen.add(url)
-                candidates.append(
-                    {
-                        "url": url,
+                if require_tile_match and tile.lower() not in clean and tile.lower() not in title and tile.lower() not in text:
+                    continue
+                if require_tile_match and not any(term in text for term in ("elevation", "ned", "3dep")):
+                    continue
+                seen.add(candidate_key(url))
+                candidates.append({
+                    "url": url,
+                    "title": item.get("title"),
+                    "published": publication_key(item, url),
+                    "format": item.get("format") or "GeoTIFF",
+                    "source_query": extra,
+                    "product_current": is_current_product(item, url),
+                })
+
+                derived = current_from_historical(url)
+                if derived and candidate_key(derived) not in seen:
+                    seen.add(candidate_key(derived))
+                    candidates.insert(0, {
+                        "url": derived,
                         "title": item.get("title"),
-                        "published": publication_key(item, url),
+                        "published": publication_key(item, derived),
                         "format": item.get("format") or "GeoTIFF",
                         "source_query": extra,
-                        "product_current": is_current_product(item, url),
-                    }
-                )
+                        "product_current": True,
+                        "derived_current": True,
+                    })
 
     if not candidates:
         detail = "; ".join(errors) if errors else "TNMAccess returned no matching product URLs"
         raise RuntimeError(f"{tile.upper()} discovery failed: {detail}")
 
-    # Never silently downgrade to historical if TNMAccess returned a current
-    # product. If no current product exists, use the newest dated product.
-    candidates.sort(
-        key=lambda item: (
-            not item["product_current"],
-            item["published"],
-        ),
-        reverse=False,
-    )
     current = [item for item in candidates if item["product_current"]]
-    if current:
-        current.sort(key=lambda item: item["published"], reverse=True)
-        chosen = current[0]
-    else:
-        candidates.sort(key=lambda item: item["published"], reverse=True)
-        chosen = candidates[0]
+    historical = [item for item in candidates if not item["product_current"]]
+    current.sort(key=lambda item: item["published"], reverse=True)
+    historical.sort(key=lambda item: item["published"], reverse=True)
+
+    chosen = current[0] if current else historical[0]
+    if not current:
         chosen["fallback_historical"] = True
 
     chosen["tile"] = tile
@@ -323,14 +371,12 @@ def main() -> int:
 
     manifest_path = args.output / "manifest.json"
     manifest = load_manifest(manifest_path)
-    manifest.update(
-        {
-            "version": 2,
-            "source": "USGS 3DEP / TNMAccess",
-            "bbox": list(args.bbox),
-            "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-    )
+    manifest.update({
+        "version": 2,
+        "source": "USGS 3DEP / TNMAccess",
+        "bbox": list(args.bbox),
+        "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
 
     session_local = threading.local()
 
