@@ -18,12 +18,13 @@ def _set_current_release_docs() -> None:
     docs = getattr(workspace, "DOCS", None)
     if not isinstance(docs, list):
         return
-    current = ("2.2.0 Release Notes", "docs/RELEASE_NOTES_2.2.0.md")
+    current = ("2.2.1 Release Notes", "docs/RELEASE_NOTES_2.2.1.md")
     historical_paths = {
         "docs/RELEASE_NOTES_2.0.0.md",
         "docs/RELEASE_NOTES_2.0.1.md",
         "docs/RELEASE_NOTES_2.1.0.md",
         "docs/RELEASE_NOTES_2.2.0.md",
+        "docs/RELEASE_NOTES_2.2.1.md",
     }
     updated = [entry for entry in docs if entry[1] not in historical_paths]
     insert_at = next(
