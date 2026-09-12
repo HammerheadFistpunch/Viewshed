@@ -109,7 +109,7 @@ The work/output data can also include:
 
 ## DEM archive tooling
 
-Signal Peak 2.2.0 also includes a documented bulk DEM workflow for building reusable offline USGS 3DEP terrain archives. This archive workflow is separate from the normal per-run DEM cache and does not change the propagation output format.
+Signal Peak 2.2.1 also includes a documented bulk DEM workflow for building reusable offline USGS 3DEP terrain archives. This archive workflow is separate from the normal per-run DEM cache and does not change the propagation output format.
 
 ## Hard circular edges
 
