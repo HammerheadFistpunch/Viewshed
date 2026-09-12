@@ -2,6 +2,8 @@
 
 `dem_bulk_downloader.py` is a standalone utility for building an offline archive of the USGS 3DEP DEM tiles used by Signal Peak. It uses TNMAccess to discover actual products and supports both 1 arc-second and 1/3 arc-second DEMs.
 
+Signal Peak 2.2.1 uses the same improved TNMAccess product-selection logic for runtime terrain preparation and the bulk archive workflow.
+
 ## Easiest Windows workflow
 
 You do not need to use IDLE or enter command-line arguments manually.
@@ -81,7 +83,15 @@ This rectangular extent intentionally includes some fringe ocean, Canada, and Me
 
 ## Current-product selection
 
-The downloader now follows the same TNMAccess selection logic as Signal Peak's runtime DEM acquisition. Exact bbox-scoped NED queries are used for spatial/product selection rather than requiring the tile identifier to appear in the product URL. If TNMAccess exposes a historical URL, the downloader derives and tries the corresponding current object first, then retains the historical product as a fallback.
+The downloader now follows Signal Peak 2.2.1's TNMAccess selection logic. Exact bbox-scoped NED queries are used for spatial/product selection rather than requiring the tile identifier to appear in the product URL. If TNMAccess exposes a historical URL, the downloader derives and tries the corresponding current object first, then retains the historical product as a fallback.
+
+This distinction matters because TNMAccess is a product catalog rather than a guaranteed tile-name index. Broad free-text discovery remains filtered by tile identifier and elevation/NED/3DEP terms to avoid unrelated products.
+
+## Runtime no-data behavior
+
+The runtime Signal Peak DEM adapter can encounter legitimate tiles with no terrestrial 3DEP product, particularly near ocean boundaries in large CONUS analyses. When TNMAccess successfully confirms that no DEM product exists, Signal Peak 2.2.1 can represent that tile as validated nodata terrain rather than failing the entire propagation run.
+
+This behavior applies to runtime terrain preparation; the bulk archive remains an inventory/download tool and does not manufacture terrain products for tiles that USGS does not provide.
 
 ## Resume behavior
 
