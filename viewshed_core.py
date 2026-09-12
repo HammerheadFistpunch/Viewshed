@@ -17,7 +17,7 @@ from osm_crossref import cross_reference_osm
 from rendering import install_rendering_fix
 from station_sources import acquire_station_cache
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.1"
 USER_OVERRIDE_ENV = "VIEWSHED_LOCATION_OVERRIDE_PATH"
 
 
