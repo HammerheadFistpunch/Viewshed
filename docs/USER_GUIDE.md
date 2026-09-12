@@ -2,9 +2,9 @@
 
 ## Overview
 
-Signal Peak 2.2.0 is a map-first VHF/APRS propagation-analysis application. Area, Station, and Custom modes use the same terrain/ITM/link-margin foundation; the difference is how the site and radio inputs are selected.
+Signal Peak 2.2.1 is a map-first VHF/APRS propagation-analysis application. Area, Station, and Custom modes use the same terrain/ITM/link-margin foundation; the difference is how the site and radio inputs are selected.
 
-Version 2.2.0 improves USGS 3DEP / TNMAccess DEM selection and fallback behavior and adds a packaged bulk DEM archive workflow. Exact bbox-scoped NED requests are treated as authoritative, while broad discovery remains filtered to avoid unrelated products. The bulk downloader supports resume-safe downloads and configurable resolution, geographic extent, output location, workers, timeouts, retries, discovery-only mode, and refresh mode.
+Version 2.2.1 improves USGS 3DEP / TNMAccess DEM selection and fallback behavior and adds a packaged bulk DEM archive workflow. Exact bbox-scoped NED requests are treated as authoritative, while broad discovery remains filtered to avoid unrelated products. The bulk downloader supports resume-safe downloads and configurable resolution, geographic extent, output location, workers, timeouts, retries, discovery-only mode, and refresh mode.
 
 Version 2.1.0 added independent output-layer selection, unified heat-map styling, positive/gap/redundancy products, clearer correction states, Corrections rendering fixes, and removed the legacy user-facing worker DEM dimension control from Advanced. The Resources model now owns DEM sizing and worker planning.
 
@@ -175,4 +175,4 @@ After a successful run, the header provides **Open Output Folder**, **Open KMZ**
 
 ## Help / About
 
-Help/About reports **Signal Peak 2.2.0** and provides offline access to the bundled README, Quick Start, current release notes, propagation/model documentation, station/correction documentation, output interpretation, license/dependency notes, and the current `ViewshedData` directory.
+Help/About reports **Signal Peak 2.2.1** and provides offline access to the bundled README, Quick Start, current release notes, propagation/model documentation, station/correction documentation, output interpretation, license/dependency notes, and the current `ViewshedData` directory.
