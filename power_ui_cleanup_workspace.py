@@ -10,6 +10,7 @@ from tooltips import add_tooltip
 from viewshed_core import Region, prepare_job
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 from microwave_settings import microwave_radio
+from antenna_patterns import ANTENNA_PRESETS
 
 
 class ViewshedWorkspace(_FeatureWorkspace):
@@ -242,8 +243,44 @@ class ViewshedWorkspace(_FeatureWorkspace):
         self._microwave_vars["polarization"] = tk.StringVar(value="Vertical")
         ttk.Label(box, text="Polarization").grid(row=13, column=0, sticky="w")
         ttk.Combobox(box, textvariable=self._microwave_vars["polarization"], values=("Horizontal", "Vertical"), state="readonly", width=18).grid(row=13, column=1, sticky="ew")
-        ttk.Label(box, text="Gain applies in all directions. Set sensitivity for your intended bandwidth and data rate. Below 1 km: clear-path free-space estimate; blocked paths excluded. Trees, buildings and weather losses are not modeled.", wraplength=310).grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Button(box, text="Run microwave propagation", command=self.run_microwave).grid(row=15, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self._build_antenna_controls(box)
+        ttk.Label(box, text="RX gain assumes the receiver aims at the site. MIMO presets describe antennas; extra streams add no modeled gain. Set sensitivity for your bandwidth/data rate. Below 1 km: clear-path free-space estimate. Trees, buildings and weather losses are not modeled.", wraplength=310).grid(row=25, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(box, text="Run microwave propagation", command=self.run_microwave).grid(row=26, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
+    def _build_antenna_controls(self, box):
+        for row, side in ((14, "tx"), (15, "rx")):
+            key = side + "_antenna_preset"
+            self._microwave_vars[key] = tk.StringVar(value="Uniform / manual")
+            ttk.Label(box, text=side.upper() + " antenna preset").grid(row=row, column=0, sticky="w")
+            chooser = ttk.Combobox(box, textvariable=self._microwave_vars[key], values=tuple(ANTENNA_PRESETS), state="readonly", width=18)
+            chooser.grid(row=row, column=1, sticky="ew", pady=3)
+            chooser.bind("<<ComboboxSelected>>", lambda e, side=side: self._apply_antenna_preset(side))
+        self._microwave_vars["tx_pattern"] = tk.StringVar(value="uniform")
+        ttk.Label(box, text="TX pattern").grid(row=16, column=0, sticky="w")
+        ttk.Combobox(box, textvariable=self._microwave_vars["tx_pattern"], values=("uniform", "directional"), state="readonly", width=18).grid(row=16, column=1, sticky="ew")
+        for row, (label, key, default) in enumerate([
+            ("TX azimuth (grid °)", "tx_azimuth_deg", "0"),
+            ("TX tilt (°, up positive)", "tx_tilt_deg", "0"),
+            ("Horizontal beamwidth (°)", "tx_az_beamwidth_deg", "360"),
+            ("Vertical beamwidth (°)", "tx_el_beamwidth_deg", "180"),
+            ("Off-axis loss cap (dB)", "tx_pattern_floor_db", "30"),
+        ], 17):
+            self._microwave_vars[key] = tk.StringVar(value=default)
+            self._field(box, row, label, self._microwave_vars[key])
+        self._antenna_note = tk.StringVar(value="Presets are editable starting points. Directional patterns use a simplified main lobe, not measured sidelobes. Azimuth: projected grid north = 0°, east = 90°.")
+        ttk.Label(box, textvariable=self._antenna_note, wraplength=310).grid(row=22, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+    def _apply_antenna_preset(self, side):
+        preset = ANTENNA_PRESETS[self._microwave_vars[side + "_antenna_preset"].get()]
+        self._microwave_vars[side + "_gain_dbi"].set(str(preset["gain_dbi"]))
+        if side == "tx":
+            for key, value in (("tx_pattern", preset["pattern"]),
+                               ("tx_az_beamwidth_deg", preset["az_bw"]),
+                               ("tx_el_beamwidth_deg", preset["el_bw"])):
+                self._microwave_vars[key].set(str(value))
+            if preset["frequency_ghz"] is not None:
+                self._microwave_vars["frequency_ghz"].set(str(preset["frequency_ghz"]))
+        self._antenna_note.set(side.upper() + ": " + preset["note"] + " All values remain editable. Patterns use a simplified main lobe.")
 
     def run_microwave(self):
         try:

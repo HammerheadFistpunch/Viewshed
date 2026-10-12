@@ -1,5 +1,6 @@
 """Validated GHz inputs, translated to the engine's MHz/dBd convention."""
 import math
+from antenna_patterns import pattern_settings
 
 
 def microwave_radio(values):
@@ -18,7 +19,7 @@ def microwave_radio(values):
     pol = values["polarization"]
     if pol not in ("Horizontal", "Vertical"):
         raise ValueError("Choose Horizontal or Vertical polarization.")
-    return {
+    radio = {
         "freq_mhz": parsed["frequency_ghz"] * 1000,
         "tx_power_dbm": parsed["tx_power_dbm"],
         "tx_antenna_gain_dbd": parsed["tx_gain_dbi"] - 2.15,
@@ -34,3 +35,7 @@ def microwave_radio(values):
         "sampling_mode": "microwave",
         "loss_sample_spacing_m": parsed["loss_sample_spacing_m"],
     }
+    radio.update(pattern_settings(values))
+    radio["tx_antenna_preset"] = str(values.get("tx_antenna_preset", "Uniform / manual"))
+    radio["rx_antenna_preset"] = str(values.get("rx_antenna_preset", "Uniform / manual"))
+    return radio

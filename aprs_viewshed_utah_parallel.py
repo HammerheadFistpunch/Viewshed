@@ -443,6 +443,14 @@ def _process_station(args: tuple):
                                 + 20.0 * math.log10(FREQ_MHZ)) if geo_ok else (MAX_LOSS_DB + 30.0)
                     else:
                         loss = (MAX_LOSS_DB - 20.0) if geo_ok else (MAX_LOSS_DB + 30.0)
+                if microwave and cfg.get("tx_pattern") == "directional":
+                    from antenna_patterns import pattern_loss_db
+                    # Bearings use the projected DEM grid north. Positive tilt
+                    # points upward; include the engine's effective-earth curve.
+                    vertical_m = (profile_slice[-1] + TARGET_H - obs_terrain_elev - ant_h
+                                  - CURVATURE_COEFF * sdist_m ** 2 / (2.0 * 6371000.0))
+                    elevation = math.degrees(math.atan2(vertical_m, sdist_m))
+                    loss += pattern_loss_db(cfg, math.degrees(angle), elevation)
                 sample_margins[si] = MAX_LOSS_DB - loss
             except Exception as _e:
                 sample_margins[si] = MARGIN_FLOOR_DB - 1.0
