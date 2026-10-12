@@ -64,6 +64,27 @@ Manufacturer references for named presets:
 - CPE510: https://static.tp-link.com/CPE510-Datasheet.pdf
 - RocketDish LW: https://techspecs.ui.com/uisp/wireless/rd-5g30-lw
 
+## Verifying directionality
+
+Microwave runs print the active TX pattern, aiming and beamwidth in the run log.
+The exported station description also records pattern and aiming. The lower-band
+button is explicitly labeled Run 20 MHz–1 GHz propagation; antenna settings below
+it apply to Run microwave propagation.
+
+Cached worker rasters now carry an RF configuration signature. Changing aim,
+gain, pattern, frequency or other settings invalidates the cached raster; older
+rasters without a signature are recalculated.
+
+`python tools/verify_directional_kmz.py` exercises the spawned worker, merge,
+network heatmap and KMZ exporter using a synthetic flat DEM. It verifies that
+0° and 90° TX aiming rotate the visible beam north/east in the actual PNG stored
+inside the KMZ, including a rerun in the same work directory. The unit suite
+also checks cache reuse with unchanged settings and invalidation on rotation.
+
+A directional pattern does not exclude every point outside its half-power
+beamwidth: sufficient link margin may still support off-axis coverage. The
+editable off-axis loss cap limits attenuation in this approximate model.
+
 Validation: polarization impedance and production ITM loss regression, GHz range
 and finite-value validation, isotropic link-budget arithmetic, sampling spacing
 and endpoint/ridge checks, and job creation including imperial UI mode. A Windows

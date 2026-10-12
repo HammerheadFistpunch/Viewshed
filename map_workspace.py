@@ -352,7 +352,7 @@ class ViewshedWorkspace(ttk.Frame):
         self._field(box, 5, "TX antenna gain (dBd)", self.custom_gain)
         self._field(box, 6, "Frequency (MHz)", self.custom_freq)
         ttk.Button(box, text="Update map", command=self._draw_custom).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(7, 0))
-        ttk.Button(controls, text="Run custom propagation", command=self.run_custom).pack(fill="x", pady=(10, 0))
+        ttk.Button(controls, text="Run 20 MHz–1 GHz propagation", command=self.run_custom).pack(fill="x", pady=(10, 0))
         ttk.Label(controls, text="Link budget uses the same receiver assumptions as the reference mobile profile, with a 10 dB operational reserve.", wraplength=340).pack(anchor="w", pady=(8, 0))
 
         self.custom_map = tkintermapview.TkinterMapView(map_frame, corner_radius=0)

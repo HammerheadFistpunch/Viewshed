@@ -336,6 +336,10 @@ def run_legacy_worker(job_file: Path) -> Path:
     cfg.update(job.radio_settings)
 
     print(f"Frequency: {float(cfg.get('freq_mhz', 144.390)):.3f} MHz")
+    if cfg.get("sampling_mode") == "microwave":
+        print(f"TX antenna: {cfg.get('tx_antenna_preset', 'manual')}; pattern={cfg.get('tx_pattern', 'uniform')}")
+        print(f"TX aim: {float(cfg.get('tx_azimuth_deg', 0)):.1f} deg grid azimuth; {float(cfg.get('tx_tilt_deg', 0)):.1f} deg tilt")
+        print(f"TX beam: {float(cfg.get('tx_az_beamwidth_deg', 360)):.1f} x {float(cfg.get('tx_el_beamwidth_deg', 180)):.1f} deg; off-axis loss cap {float(cfg.get('tx_pattern_floor_db', 30)):.1f} dB")
     print(f"TX power: {float(cfg.get('tx_power_dbm', 47.0)):.1f} dBm")
     print(f"TX antenna gain: {float(cfg.get('tx_antenna_gain_dbd', 0.0)):.1f} dBd")
     print(f"TX antenna height: {float(cfg.get('antenna_height_digi_m', 20.0)):.1f} m AGL")
@@ -378,3 +382,4 @@ def self_test() -> str:
         f"{len(selected)} selected in smoke region; location quality "
         f"H/M/L={quality['HIGH']}/{quality['MEDIUM']}/{quality['LOW']}"
     )
+

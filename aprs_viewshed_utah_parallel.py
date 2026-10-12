@@ -185,6 +185,17 @@ def _itm_ground_impedance(freq_mhz, epsr, conductivity, polarization):
     return qlrps(freq_mhz, 0.0, 301.0, polarization, epsr, conductivity)[3]
 
 
+def _rf_cache_signature(station, cfg, dem_info, transform, observer):
+    """Reject cached output from another RF configuration or engine revision."""
+    import hashlib
+    payload = {"engine_revision": "microwave-directional-2", "station": station,
+               "settings": cfg, "dem_shape": dem_info["shape"],
+               "dem_dtype": dem_info["dtype"], "transform": transform,
+               "observer": observer}
+    serialized = json.dumps(payload, sort_keys=True, default=str, allow_nan=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def _process_station(args: tuple):
     """
     Compute the viewshed for one APRS station using the full ITM pipeline.
@@ -247,6 +258,8 @@ def _process_station(args: tuple):
     work_dir  = Path(work_dir_str)
     safe_call = callsign.replace("-", "_").replace("/", "_").replace(" ", "_")
     vs_path   = work_dir / f"viewshed_{safe_call}.tif"
+    cache_signature = _rf_cache_signature(station, cfg, _dem_shm_info, utm_tf_tuple,
+                                        (obs_row, obs_col, obs_terrain_elev))
 
     if vs_path.exists():
         _cache_ok = False
@@ -256,14 +269,14 @@ def _process_station(args: tuple):
             with _rc.open(vs_path) as _chk:
                 _t = _chk.transform
                 _cache_ok = (_t != _Af.identity() and
-                             _t.a != 0.0 and _t.e != 0.0)
+                             _t.a != 0.0 and _t.e != 0.0 and
+                             _chk.tags().get("rf_cache_signature") == cache_signature)
         except Exception:
             pass 
         if not _cache_ok:
             try:
                 vs_path.unlink()
-                print(f"   ⚠  {callsign}: cached TIF had no geotransform "
-                      f"(corrupt from previous run) — recomputing")
+                print(f"   {callsign}: cached TIF is invalid or RF settings changed — recomputing")
             except Exception:
                 pass
         else:
@@ -526,6 +539,10 @@ def _process_station(args: tuple):
     }
     with rasterio.open(vs_path, "w", **vs_meta) as dst:
         dst.write(coverage, 1)
+        dst.update_tags(rf_cache_signature=cache_signature,
+                        tx_pattern=cfg.get("tx_pattern", "uniform"),
+                        tx_azimuth_deg=str(cfg.get("tx_azimuth_deg", 0)),
+                        tx_tilt_deg=str(cfg.get("tx_tilt_deg", 0)))
 
     try:
         with rasterio.open(vs_path) as _v:
@@ -1524,6 +1541,9 @@ def build_kmz(stations: list, png_path: Path, bbox: tuple, cfg: dict,
             f"<tr><td><b>Callsign</b></td><td>{callsign}</td></tr>"
             f"<tr><td><b>Type</b></td><td>{type_label}</td></tr>"
             f"<tr><td><b>Frequency</b></td><td>{float(s.get('freq_mhz', cfg['freq_mhz'])):.3f} MHz</td></tr>"
+            f"<tr><td><b>TX pattern</b></td><td>{cfg.get('tx_pattern', 'uniform')}</td></tr>"
+            f"<tr><td><b>TX aim</b></td><td>{float(cfg.get('tx_azimuth_deg', 0)):.1f}° grid azimuth / {float(cfg.get('tx_tilt_deg', 0)):.1f}° tilt</td></tr>"
+            f"<tr><td><b>TX beamwidth</b></td><td>{float(cfg.get('tx_az_beamwidth_deg', 360)):.1f}° horizontal / {float(cfg.get('tx_el_beamwidth_deg', 180)):.1f}° vertical</td></tr>"
             f"<tr><td><b>Coordinates</b></td><td>{lat:.5f}°N, {lon:.5f}°E</td></tr>"
             f"<tr><td><b>Antenna height</b></td><td>{ant_h:.0f} m AGL</td></tr>"
             f"<tr><td><b>Max path loss</b></td><td>{max_loss:.1f} dB (link budget)</td></tr>"

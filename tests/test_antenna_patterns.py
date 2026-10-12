@@ -78,6 +78,18 @@ class AntennaTests(unittest.TestCase):
                 self.assertTrue(np.isfinite(data).all())
                 self.assertGreater(data[38, 50], 0)
                 self.assertGreater(data[38, 50] - data[62, 50], 10)
+                # Identical settings can reuse the raster; changing azimuth
+                # in the same work directory must rotate and recompute it.
+                cached = engine._process_station(args)
+                self.assertIn("CACHE HIT", cached[2])
+                cfg["tx_azimuth_deg"] = 90
+                rotated = engine._process_station(args)
+                self.assertNotIn("CACHE HIT", rotated[2])
+                with rasterio.open(rotated[1]) as tif:
+                    east = tif.read(1)
+                    self.assertEqual(tif.tags()["tx_azimuth_deg"], "90")
+                self.assertGreater(east[50, 62], 0)
+                self.assertGreater(east[50, 62] - east[38, 50], 10)
         finally:
             shm.close()
             shm.unlink()
