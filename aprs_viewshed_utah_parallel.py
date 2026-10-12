@@ -176,6 +176,15 @@ def _elapsed(t0: float) -> str:
 # WORKER — runs in a child process, one station at a time.
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _itm_ground_impedance(freq_mhz, epsr, conductivity, polarization):
+    """Use ITM initialization: 0 = horizontal, 1 = vertical."""
+    from itmlogic.preparatory_subroutines.qlrps import qlrps
+
+    if polarization not in (0, 1):
+        raise ValueError("ITM polarization must be 0 (horizontal) or 1 (vertical).")
+    return qlrps(freq_mhz, 0.0, 301.0, polarization, epsr, conductivity)[3]
+
+
 def _process_station(args: tuple):
     """
     Compute the viewshed for one APRS station using the full ITM pipeline.
@@ -225,6 +234,7 @@ def _process_station(args: tuple):
     ITM_ENS         = cfg["itm_ens"]
     ITM_SGM         = cfg["itm_sgm"]
     ITM_EPSR        = cfg["itm_epsr"]
+    ITM_POL         = cfg.get("itm_pol", 1)
     full_nodata     = -9999.0
 
     N_MARGIN_SAMPLES   = int(cfg.get("n_margin_samples",        20))
@@ -356,7 +366,7 @@ def _process_station(args: tuple):
             'hg':    [float(ant_h), float(TARGET_H)],
             'ens':   ITM_ENS,
             'gme':   (1.0 / 6370e3) * (1.0 - 0.04665 * math.exp(0.005577 * ITM_ENS)),
-            'zgnd':  complex(ITM_EPSR, -18000.0 * ITM_SGM / FREQ_MHZ),
+            'zgnd':  _itm_ground_impedance(FREQ_MHZ, ITM_EPSR, ITM_SGM, ITM_POL),
             'he':    [0.0, 0.0], 'dl':  [0.0, 0.0], 'the': [0.0, 0.0],
             'dh':    0.0,        'dist': 0.0,
             'kwx':   0,          'mdp': -1,
@@ -555,7 +565,7 @@ def _process_station(args: tuple):
                     'hg':    [float(ant_h), float(TARGET_H)],
                     'ens':   ITM_ENS,
                     'gme':   (1.0 / 6370e3) * (1.0 - 0.04665 * math.exp(0.005577 * ITM_ENS)),
-                    'zgnd':  complex(ITM_EPSR, -18000.0 * ITM_SGM / FREQ_MHZ),
+                    'zgnd':  _itm_ground_impedance(FREQ_MHZ, ITM_EPSR, ITM_SGM, ITM_POL),
                     'he':    [0.0, 0.0], 'dl':  [0.0, 0.0], 'the': [0.0, 0.0],
                     'dh':    0.0,        'dist': 0.0,
                     'kwx':   0,          'mdp': -1,
@@ -1986,3 +1996,4 @@ if __name__ == "__main__":
             pass
         input("\n  Press Enter to close...\n")
         sys.exit(1)
+
