@@ -9,10 +9,26 @@ from station_data_workspace import KM_PER_MI, M_PER_FT, ViewshedWorkspace as _Fe
 from tooltips import add_tooltip
 from viewshed_core import Region, prepare_job
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
+from microwave_settings import microwave_radio
 
 
 class ViewshedWorkspace(_FeatureWorkspace):
     """Keep presentation controls in Output and Custom power input in watts."""
+
+    def _split(self, parent, width=330):
+        controls, map_frame = super()._split(parent, width)
+        if parent is not self.custom_tab:
+            return controls, map_frame
+        canvas = tk.Canvas(controls, width=width, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(controls, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        content = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        return content, map_frame
 
     TOOLTIP_TEXT = {
         "Operational path-loss cap (dB)": (
@@ -189,6 +205,63 @@ class ViewshedWorkspace(_FeatureWorkspace):
                 remove_legacy_note(child)
 
         remove_legacy_note(self.custom_tab)
+        self._build_microwave_section()
+
+    def _build_microwave_section(self):
+        def find_site(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.LabelFrame) and child.cget("text") == "Proposed site — 20 MHz to 1 GHz":
+                    return child
+                result = find_site(child)
+                if result is not None:
+                    return result
+            return None
+        site = find_site(self.custom_tab)
+        box = ttk.LabelFrame(site.master, text="Proposed site — 1 to 10 GHz", padding=10)
+        box.pack(fill="x", pady=(14, 0))
+        ttk.Label(box, text="Uses the map location above. Enter microwave heights in metres and radius in km.", wraplength=310).grid(row=0, column=0, columnspan=2, sticky="w")
+        fields = [
+            ("Frequency (GHz)", "frequency_ghz", "5.8"),
+            ("Microwave radius (km)", "radius_km", "20"),
+            ("TX height (m)", "tx_height_m", "10"),
+            ("RX height (m)", "rx_height_m", "2"),
+            ("Microwave TX power (dBm)", "tx_power_dbm", "20"),
+            ("TX gain (dBi)", "tx_gain_dbi", "0"),
+            ("RX gain (dBi)", "rx_gain_dbi", "0"),
+            ("Microwave RX sensitivity (dBm)", "rx_sensitivity_dbm", "-85"),
+            ("Combined system losses (dB)", "system_loss_db", "2"),
+            ("Microwave reserve (dB)", "reserve_db", "10"),
+            ("Microwave path-loss cap (dB)", "path_loss_cap_db", "200"),
+            ("Loss sample spacing (m)", "loss_sample_spacing_m", "250"),
+        ]
+        self._microwave_vars = {}
+        for row, (label, key, default) in enumerate(fields, 1):
+            var = tk.StringVar(value=default)
+            self._microwave_vars[key] = var
+            self._field(box, row, label, var)
+        self._microwave_vars["polarization"] = tk.StringVar(value="Vertical")
+        ttk.Label(box, text="Polarization").grid(row=13, column=0, sticky="w")
+        ttk.Combobox(box, textvariable=self._microwave_vars["polarization"], values=("Horizontal", "Vertical"), state="readonly", width=18).grid(row=13, column=1, sticky="ew")
+        ttk.Label(box, text="Gain applies in all directions. Set sensitivity for your intended bandwidth and data rate. Below 1 km: clear-path free-space estimate; blocked paths excluded. Trees, buildings and weather losses are not modeled.", wraplength=310).grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(box, text="Run microwave propagation", command=self.run_microwave).grid(row=15, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
+    def run_microwave(self):
+        try:
+            values = {key: var.get() for key, var in self._microwave_vars.items()}
+            lat, lon = float(self.custom_lat.get()), float(self.custom_lon.get())
+            radius = float(values["radius_km"])
+            Region(lat, lon, radius).validate()
+            overrides = microwave_radio(values)
+            radio = self._advanced_settings(persist=False)
+            radio.update(overrides)
+            record = {"callsign": "CUSTOM-MW", "type": "digi", "lat": lat, "lon": lon,
+                      "freq_mhz": overrides["freq_mhz"], "_source": "reviewed_override", "lasttime": 0}
+            _, job_file = prepare_job(Region(lat, lon, radius), Path(self.app.source_var.get()),
+                                     {"digi"}, radius, mode="custom", selected_records=[record],
+                                     radio_settings=radio, frozen_stations=True)
+            self.app.start_job(job_file, "Custom microwave station")
+        except Exception as exc:
+            messagebox.showerror("Cannot start microwave job", str(exc), parent=self)
 
     def run_custom(self) -> None:
         if getattr(self, "_imperial", False):
@@ -253,3 +326,4 @@ class ViewshedWorkspace(_FeatureWorkspace):
             self.app.start_job(job_file, "Custom station")
         except Exception as exc:
             messagebox.showerror("Cannot start custom job", str(exc), parent=self)
+

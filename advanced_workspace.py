@@ -175,7 +175,7 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             (0.1 <= values["antenna_height_digi_m"] <= 500, "Digipeater antenna height must be 0.1–500 m."),
             (0.1 <= values["antenna_height_igate_m"] <= 500, "iGate antenna height must be 0.1–500 m."),
             (0.1 <= values["observer_height_m"] <= 100, "Observer height must be 0.1–100 m."),
-            (20 <= values["freq_mhz"] <= 1000, "Frequency must be 20–1000 MHz."),
+            (20 <= values["freq_mhz"] <= 20000, "Frequency must be 20–20000 MHz."),
             (90 <= values["n_radials"] <= 2880, "Radials must be 90–2880."),
             (-30 <= values["margin_display_floor_db"] <= 20, "Margin floor must be -30 to 20 dB."),
             (0 < values["max_margin_db"] <= 100, "Maximum margin must be 0–100 dB."),
@@ -261,3 +261,4 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             self.app.start_job(job_file, f"Station {rec.get('callsign')}")
         except Exception as exc:
             messagebox.showerror("Cannot start station job", str(exc), parent=self)
+

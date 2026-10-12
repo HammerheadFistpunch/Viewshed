@@ -2,7 +2,7 @@ name: Build Signal Peak Windows executable
 
 on:
   push:
-    branches: [main, CONUS, "2.1"]
+    branches: [main, CONUS, "2.1", "feature/microwave-propagation"]
   workflow_dispatch:
 
 permissions:
@@ -58,3 +58,4 @@ jobs:
           name: Signal-Peak-Windows-${{ steps.version.outputs.version }}
           path: dist/SignalPeak.exe
           if-no-files-found: error
+

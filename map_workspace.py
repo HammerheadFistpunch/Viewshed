@@ -335,7 +335,7 @@ class ViewshedWorkspace(ttk.Frame):
         controls, map_frame = self._split(self.custom_tab, 360)
         ttk.Label(controls, text="Custom / future station", font=("Segoe UI", 13, "bold")).pack(anchor="w")
         ttk.Label(controls, text="Click the map to place a proposed station, then define the installation assumptions.", wraplength=340).pack(anchor="w", pady=(3, 10))
-        box = ttk.LabelFrame(controls, text="Proposed site", padding=10)
+        box = ttk.LabelFrame(controls, text="Proposed site — 20 MHz to 1 GHz", padding=10)
         box.pack(fill="x")
         self.custom_lat = tk.StringVar(value="40.7608")
         self.custom_lon = tk.StringVar(value="-111.8910")
@@ -537,3 +537,4 @@ class ViewshedWorkspace(ttk.Frame):
         self.reload_station_catalog()
         if call in self._correction_records: self.correct_call.set(call)
         self._correction_selected()
+

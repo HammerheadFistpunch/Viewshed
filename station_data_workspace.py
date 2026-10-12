@@ -314,8 +314,8 @@ class ViewshedWorkspace(_ViewshedWorkspace):
             if not -20 <= value <= 30:
                 raise ValueError("TX gain must be between -20 and 30 dBd.")
         elif column == "freq":
-            if not 20 <= value <= 1000:
-                raise ValueError("Frequency must be between 20 and 1000 MHz.")
+            if not 20 <= value <= 20000:
+                raise ValueError("Frequency must be between 20 and 20000 MHz.")
         elif column == "pathloss":
             if not 80 <= value <= 200:
                 raise ValueError("Path-loss cap must be between 80 and 200 dB.")
@@ -373,3 +373,4 @@ class ViewshedWorkspace(_ViewshedWorkspace):
         self._sync_haat_station_catalog()
         self._refresh_station_grid()
         self.station_data_status.set(f"Cleared user RF overrides for {len(selected)} station(s). Registry updated: {path}")
+

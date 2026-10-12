@@ -46,7 +46,8 @@ def _resolve_max_path_loss(cfg: dict) -> float:
     reserve = float(cfg.get("operational_reserve_db", 0.0))
 
     if tx_pwr or tx_ant or rx_sens or rx_ant:
-        raw_budget = tx_pwr + abs(rx_sens) + tx_ant + rx_ant
+        gain_offset = 4.3 if cfg.get("antenna_gain_reference") == "isotropic" else 0.0
+        raw_budget = tx_pwr - rx_sens + tx_ant + rx_ant + gain_offset - float(cfg.get("system_loss_db", 0.0))
         capped_budget = min(raw_budget, cap)
         effective = capped_budget - reserve
         print(
@@ -81,3 +82,4 @@ def install(engine) -> None:
     engine._process_station = process_station
     engine._resolve_max_path_loss = _resolve_max_path_loss
     engine._station_rf_override_installed = True
+

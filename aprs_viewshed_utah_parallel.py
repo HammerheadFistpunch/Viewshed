@@ -218,6 +218,8 @@ def _process_station(args: tuple):
         ITM_AVAILABLE = True
     except ImportError:
         pass
+    if cfg.get("sampling_mode") == "microwave" and not ITM_AVAILABLE:
+        raise RuntimeError("Microwave propagation requires itmlogic; install the model before running.")
 
     callsign        = station["callsign"]
     stype           = station["type"]
@@ -392,7 +394,8 @@ def _process_station(args: tuple):
         step_cols = np.linspace(obs_col, end_col, n_steps + 1)[1:]
         step_rows = np.linspace(obs_row, end_row, n_steps + 1)[1:]
 
-        n_profile_pts = min(1200, n_steps + 1)
+        microwave = cfg.get("sampling_mode") == "microwave"
+        n_profile_pts = n_steps + 1 if microwave else min(1200, n_steps + 1)
         prof_cols     = np.linspace(obs_col, end_col, n_profile_pts)
         prof_rows     = np.linspace(obs_row, end_row, n_profile_pts)
 
@@ -415,6 +418,9 @@ def _process_station(args: tuple):
         far_dists     = np.linspace(ray_dist_m * 0.20,
                                     ray_dist_m, n_far + 1)[1:]
         sample_dists  = np.concatenate([near_dists, far_dists])
+        if microwave:
+            from propagation_sampling import microwave_distances
+            sample_dists = microwave_distances(ray_dist_m, px_size, cfg.get("loss_sample_spacing_m", 250.0))
 
         sample_margins   = np.empty(len(sample_dists), dtype=np.float32)
         _first_itm_error = None   
@@ -422,14 +428,21 @@ def _process_station(args: tuple):
             frac           = sdist_m / ray_dist_m
             n_pts_slice    = max(2, int(frac * n_prof))
             profile_slice  = terrain_profile[:n_pts_slice]
+            if microwave:
+                from propagation_sampling import profile_to_distance
+                profile_slice = profile_to_distance(terrain_profile, ray_dist_m, sdist_m)
             try:
-                if ITM_AVAILABLE and sdist_m >= 500.0:
+                if ITM_AVAILABLE and sdist_m >= (1000.0 if microwave else 500.0):
                     loss = _itm_loss_for_slice(profile_slice, sdist_m)
                 else:
                     geo_ok = _geometric_los_check(
                         profile_slice, ant_h, TARGET_H,
                         CURVATURE_COEFF, sdist_m)
-                    loss = (MAX_LOSS_DB - 20.0) if geo_ok else (MAX_LOSS_DB + 30.0)
+                    if microwave:
+                        loss = (32.45 + 20.0 * math.log10(max(sdist_m, 1.0) / 1000.0)
+                                + 20.0 * math.log10(FREQ_MHZ)) if geo_ok else (MAX_LOSS_DB + 30.0)
+                    else:
+                        loss = (MAX_LOSS_DB - 20.0) if geo_ok else (MAX_LOSS_DB + 30.0)
                 sample_margins[si] = MAX_LOSS_DB - loss
             except Exception as _e:
                 sample_margins[si] = MARGIN_FLOOR_DB - 1.0
@@ -1502,7 +1515,7 @@ def build_kmz(stations: list, png_path: Path, bbox: tuple, cfg: dict,
             f"<table style='font-family:monospace;font-size:13px;'>"
             f"<tr><td><b>Callsign</b></td><td>{callsign}</td></tr>"
             f"<tr><td><b>Type</b></td><td>{type_label}</td></tr>"
-            f"<tr><td><b>Frequency</b></td><td>144.390 MHz (APRS)</td></tr>"
+            f"<tr><td><b>Frequency</b></td><td>{float(s.get('freq_mhz', cfg['freq_mhz'])):.3f} MHz</td></tr>"
             f"<tr><td><b>Coordinates</b></td><td>{lat:.5f}°N, {lon:.5f}°E</td></tr>"
             f"<tr><td><b>Antenna height</b></td><td>{ant_h:.0f} m AGL</td></tr>"
             f"<tr><td><b>Max path loss</b></td><td>{max_loss:.1f} dB (link budget)</td></tr>"
