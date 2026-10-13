@@ -34,7 +34,12 @@ class PolarizationTests(unittest.TestCase):
             results.append(scope["_itm_loss_for_slice"]([100.0] * 101, 10000))
         self.assertTrue(all(math.isfinite(x) for x in results))
         self.assertGreater(abs(results[0] - results[1]), 0.01)
+        from microwave_settings import polarized_path_loss
+        dual = polarized_path_loss({'itm_polarizations': [0, 1]},
+                                   lambda pol: scope['_itm_loss_for_slice']([100.0] * 101, 10000, pol))
+        self.assertEqual(dual, max(results))
 
 
 if __name__ == "__main__":
     unittest.main()
+

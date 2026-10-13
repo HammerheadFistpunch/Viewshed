@@ -11,6 +11,7 @@ from viewshed_core import Region, prepare_job
 from workspace_tuning import ViewshedWorkspace as _TunedWorkspace
 from microwave_settings import microwave_radio
 from antenna_patterns import ANTENNA_PRESETS
+from microwave_link_budget import CPE710_PRESET, CPE710_PLANNING, budget_text
 
 
 class ViewshedWorkspace(_FeatureWorkspace):
@@ -242,9 +243,15 @@ class ViewshedWorkspace(_FeatureWorkspace):
             self._field(box, row, label, var)
         self._microwave_vars["polarization"] = tk.StringVar(value="Vertical")
         ttk.Label(box, text="Polarization").grid(row=13, column=0, sticky="w")
-        ttk.Combobox(box, textvariable=self._microwave_vars["polarization"], values=("Horizontal", "Vertical"), state="readonly", width=18).grid(row=13, column=1, sticky="ew")
+        ttk.Combobox(box, textvariable=self._microwave_vars["polarization"], values=("Horizontal", "Vertical", "Dual (H + V)"), state="readonly", width=18).grid(row=13, column=1, sticky="ew")
         self._build_antenna_controls(box)
-        ttk.Label(box, text="RX gain assumes the receiver aims at the site. MIMO presets describe antennas; extra streams add no modeled gain. Set sensitivity for your bandwidth/data rate. Below 1 km: clear-path free-space estimate. Trees, buildings and weather losses are not modeled.", wraplength=310).grid(row=25, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(box, text="CPE710 pair: planning defaults", command=self._apply_cpe710_pair).grid(row=23, column=0, columnspan=2, sticky="ew", pady=4)
+        self._microwave_budget_note = tk.StringVar()
+        ttk.Label(box, textvariable=self._microwave_budget_note, wraplength=310).grid(row=24, column=0, columnspan=2, sticky="w", pady=4)
+        for var in self._microwave_vars.values():
+            var.trace_add("write", self._update_microwave_budget)
+        self._update_microwave_budget()
+        ttk.Label(box, text="RX gain assumes the receiver aims at the site. Enter actual TX power per channel and sensitivity for your bandwidth/data rate. Dual mode requires both H/V channels; no MIMO gain or throughput bonus. Below 1 km: geometric LOS/free-space estimate. Trees, buildings and weather losses are not modeled.", wraplength=310).grid(row=25, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(box, text="Run microwave propagation", command=self.run_microwave).grid(row=26, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
     def _build_antenna_controls(self, box):
@@ -273,6 +280,8 @@ class ViewshedWorkspace(_FeatureWorkspace):
     def _apply_antenna_preset(self, side):
         preset = ANTENNA_PRESETS[self._microwave_vars[side + "_antenna_preset"].get()]
         self._microwave_vars[side + "_gain_dbi"].set(str(preset["gain_dbi"]))
+        if "polarization" in preset:
+            self._microwave_vars["polarization"].set(preset["polarization"])
         if side == "tx":
             for key, value in (("tx_pattern", preset["pattern"]),
                                ("tx_az_beamwidth_deg", preset["az_bw"]),
@@ -281,6 +290,27 @@ class ViewshedWorkspace(_FeatureWorkspace):
             if preset["frequency_ghz"] is not None:
                 self._microwave_vars["frequency_ghz"].set(str(preset["frequency_ghz"]))
         self._antenna_note.set(side.upper() + ": " + preset["note"] + " All values remain editable. Patterns use a simplified main lobe.")
+
+    def _apply_cpe710_pair(self):
+        for side in ("tx", "rx"):
+            self._microwave_vars[side + "_antenna_preset"].set(CPE710_PRESET)
+            self._apply_antenna_preset(side)
+        for key, value in CPE710_PLANNING.items():
+            self._microwave_vars[key].set(str(value))
+        self._antenna_note.set("CPE710 pair: 20 dBm/channel, -85 dBm sensitivity and 15 dB reserve are editable planning assumptions, not a manufacturer rate/receiver specification. Replace with actual radio settings. Aim TX at the remote receiver; heights are unchanged.")
+
+    def _update_microwave_budget(self, *_):
+        try:
+            values = {key: var.get() for key, var in self._microwave_vars.items()}
+            note = budget_text(values)
+            if CPE710_PRESET in (values.get("tx_antenna_preset"), values.get("rx_antenna_preset")):
+                if not 5.15 <= float(values["frequency_ghz"]) <= 5.85:
+                    note += " CPE710 hardware frequency range is 5.15–5.85 GHz."
+                if values.get("tx_antenna_preset") == CPE710_PRESET and float(values["tx_power_dbm"]) > 27:
+                    note += " TX power exceeds CPE710's published 27 dBm maximum."
+            self._microwave_budget_note.set(note)
+        except (ValueError, KeyError):
+            self._microwave_budget_note.set("Complete valid microwave inputs to see the link-budget check.")
 
     def run_microwave(self):
         try:
@@ -363,4 +393,5 @@ class ViewshedWorkspace(_FeatureWorkspace):
             self.app.start_job(job_file, "Custom station")
         except Exception as exc:
             messagebox.showerror("Cannot start custom job", str(exc), parent=self)
+
 

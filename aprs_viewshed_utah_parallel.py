@@ -188,7 +188,7 @@ def _itm_ground_impedance(freq_mhz, epsr, conductivity, polarization):
 def _rf_cache_signature(station, cfg, dem_info, transform, observer):
     """Reject cached output from another RF configuration or engine revision."""
     import hashlib
-    payload = {"engine_revision": "microwave-directional-2", "station": station,
+    payload = {"engine_revision": "microwave-dual-3", "station": station,
                "settings": cfg, "dem_shape": dem_info["shape"],
                "dem_dtype": dem_info["dtype"], "transform": transform,
                "observer": observer}
@@ -371,7 +371,7 @@ def _process_station(args: tuple):
             vals[0] = obs_terrain_elev
         return vals.tolist()
 
-    def _itm_loss_for_slice(profile_slice: list, dist_m: float) -> float:
+    def _itm_loss_for_slice(profile_slice: list, dist_m: float, polarization=None) -> float:
         n_pts  = len(profile_slice)
         step_m = dist_m / max(n_pts - 1, 1)
         pfl    = [n_pts - 1, float(step_m)] + [float(v) for v in profile_slice]
@@ -381,7 +381,7 @@ def _process_station(args: tuple):
             'hg':    [float(ant_h), float(TARGET_H)],
             'ens':   ITM_ENS,
             'gme':   (1.0 / 6370e3) * (1.0 - 0.04665 * math.exp(0.005577 * ITM_ENS)),
-            'zgnd':  _itm_ground_impedance(FREQ_MHZ, ITM_EPSR, ITM_SGM, ITM_POL),
+            'zgnd':  _itm_ground_impedance(FREQ_MHZ, ITM_EPSR, ITM_SGM, ITM_POL if polarization is None else polarization),
             'he':    [0.0, 0.0], 'dl':  [0.0, 0.0], 'the': [0.0, 0.0],
             'dh':    0.0,        'dist': 0.0,
             'kwx':   0,          'mdp': -1,
@@ -446,7 +446,11 @@ def _process_station(args: tuple):
                 profile_slice = profile_to_distance(terrain_profile, ray_dist_m, sdist_m)
             try:
                 if ITM_AVAILABLE and sdist_m >= (1000.0 if microwave else 500.0):
-                    loss = _itm_loss_for_slice(profile_slice, sdist_m)
+                    if microwave:
+                        from microwave_settings import polarized_path_loss
+                        loss = polarized_path_loss(cfg, lambda pol: _itm_loss_for_slice(profile_slice, sdist_m, pol))
+                    else:
+                        loss = _itm_loss_for_slice(profile_slice, sdist_m)
                 else:
                     geo_ok = _geometric_los_check(
                         profile_slice, ant_h, TARGET_H,
@@ -540,6 +544,7 @@ def _process_station(args: tuple):
     with rasterio.open(vs_path, "w", **vs_meta) as dst:
         dst.write(coverage, 1)
         dst.update_tags(rf_cache_signature=cache_signature,
+                        polarization_mode=cfg.get("polarization_mode", "single H/V"),
                         tx_pattern=cfg.get("tx_pattern", "uniform"),
                         tx_azimuth_deg=str(cfg.get("tx_azimuth_deg", 0)),
                         tx_tilt_deg=str(cfg.get("tx_tilt_deg", 0)))
@@ -1541,6 +1546,7 @@ def build_kmz(stations: list, png_path: Path, bbox: tuple, cfg: dict,
             f"<tr><td><b>Callsign</b></td><td>{callsign}</td></tr>"
             f"<tr><td><b>Type</b></td><td>{type_label}</td></tr>"
             f"<tr><td><b>Frequency</b></td><td>{float(s.get('freq_mhz', cfg['freq_mhz'])):.3f} MHz</td></tr>"
+            f"<tr><td><b>Polarization</b></td><td>{cfg.get('polarization_mode', 'Vertical' if cfg.get('itm_pol', 1) else 'Horizontal')}</td></tr>"
             f"<tr><td><b>TX pattern</b></td><td>{cfg.get('tx_pattern', 'uniform')}</td></tr>"
             f"<tr><td><b>TX aim</b></td><td>{float(cfg.get('tx_azimuth_deg', 0)):.1f}° grid azimuth / {float(cfg.get('tx_tilt_deg', 0)):.1f}° tilt</td></tr>"
             f"<tr><td><b>TX beamwidth</b></td><td>{float(cfg.get('tx_az_beamwidth_deg', 360)):.1f}° horizontal / {float(cfg.get('tx_el_beamwidth_deg', 180)):.1f}° vertical</td></tr>"
@@ -2037,4 +2043,5 @@ if __name__ == "__main__":
             pass
         input("\n  Press Enter to close...\n")
         sys.exit(1)
+
 

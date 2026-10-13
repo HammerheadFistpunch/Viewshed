@@ -45,8 +45,12 @@ antenna in that category. All gains and beamwidths remain editable.
 TX presets set peak gain, pattern and beamwidth; named 5 GHz presets also set a
 5.5 GHz starting frequency. RX presets set peak gain only and assume boresight
 alignment toward the proposed site. Gain figures are per antenna/channel; MIMO
-does not add gain or simulate throughput/diversity. The selected ITM H/V setting
-represents one channel of a dual-polarized antenna. Check hardware frequency
+does not add gain or simulate throughput/diversity. A selected H or V setting
+represents one channel of a dual-polarized antenna. Dual (H + V) evaluates both
+ITM polarizations independently and uses the larger path loss (weaker margin),
+so both channels must meet the budget. It is a conservative two-channel check,
+not spatial multiplexing, combining gain, or a throughput prediction. Below 1 km,
+the free-space estimate is polarization independent. Check hardware frequency
 range after editing frequency; antenna gain and beamwidth are not automatically
 scaled with frequency.
 
@@ -61,6 +65,8 @@ is subtracted from link margin at each sample before raster interpolation and
 the existing gap-fill/smoothing stages; sharp beam edges may be smoothed.
 
 Manufacturer references for named presets:
+- CPE710: https://www.tp-link.com/us/business-networking/outdoor-radio/cpe710/v1/
+- CPE710 H/V pattern plots: https://static.tp-link.com/upload/product-overview/2025/202511/20251106/CPE%20series-Datasheet.pdf
 - CPE510: https://static.tp-link.com/CPE510-Datasheet.pdf
 - RocketDish LW: https://techspecs.ui.com/uisp/wireless/rd-5g30-lw
 
@@ -80,6 +86,8 @@ network heatmap and KMZ exporter using a synthetic flat DEM. It verifies that
 0° and 90° TX aiming rotate the visible beam north/east in the actual PNG stored
 inside the KMZ, including a rerun in the same work directory. The unit suite
 also checks cache reuse with unchanged settings and invalidation on rotation.
+`python tools/verify_directional_kmz.py --dual` checks both-channel worker
+execution, beam rotation and the exported dual-polarization label.
 
 A directional pattern does not exclude every point outside its half-power
 beamwidth: sufficient link margin may still support off-axis coverage. The
@@ -89,3 +97,50 @@ Validation: polarization impedance and production ITM loss regression, GHz range
 and finite-value validation, isotropic link-budget arithmetic, sampling spacing
 and endpoint/ridge checks, and job creation including imperial UI mode. A Windows
 visual check and packaged executable smoke test remain required before release.
+
+## CPE710 and realistic distance checks
+
+CPE710 TX/RX antenna presets use 23 dBi, 9° azimuth / 7° elevation and dual H/V.
+The TX preset sets 5.8 GHz, gain, beam and polarization; the RX preset sets gain
+and polarization. Neither silently applies maximum power or invents a factory
+receiver sensitivity. Both retain editable main-lobe approximations.
+
+The optional **CPE710 pair: planning defaults** button configures both antennas,
+20 dBm per-channel TX power, -85 dBm assumed sensitivity, 2 dB combined system
+loss, 15 dB reserve, 200 dB cap and 30 km inspection radius. These power and
+sensitivity settings are planning assumptions, not certified rate-specific
+specifications. Antenna heights and aiming stay at their current values.
+Replace TX power with actual per-channel power (do not use a summed two-chain
+power as each channel's power), and sensitivity with the intended channel width
+and modulation's threshold. The published 27 dBm hardware maximum depends on
+region/settings; it is not a guaranteed per-stream power at every data rate.
+
+The live budget readout uses:
+`raw budget = TX dBm + TX dBi + RX dBi - system losses - sensitivity dBm`;
+`effective budget = min(raw budget, cap) - reserve`.
+It reports aligned free-space RX power, margin after cap/reserve and the ideal
+zero-margin distance. This arithmetic matches the worker's microwave budget.
+It is a forward-link estimate; asymmetric hardware needs a separate reverse-link
+run. It does not include terrain, interference, weather or receiver misalignment.
+
+For a CPE710 pair at 5.8 GHz with the planning power/loss/reserve above:
+
+| Assumed sensitivity | Ideal free-space distance |
+| --- | --- |
+| -85 dBm | 20.6 km |
+| -75 dBm | 6.5 km |
+| -65 dBm | 2.1 km |
+
+These thresholds illustrate why usable range depends on the desired rate; they
+are not manufacturer MCS profiles or throughput promises. At 30 km, FSPL is
+137.3 dB, received power is -73.3 dBm and margin after the -85 dBm threshold and
+15 dB reserve is -3.3 dB. Using 27 dBm *per channel*, if actually available,
+would improve that result by 7 dB; do not infer it from an aggregate power spec.
+
+At 30 km the midpoint 60% first-Fresnel radius is 11.8 m and the 4/3-earth bulge
+is 13.2 m. The readout shows both values as clearance context, not a terrain
+clearance test. On equal-height, level-ground endpoints their sum is about 25 m;
+low poles can fail even with enough free-space signal. ITM terrain propagation
+remains the coverage calculation. Source DEM resolution, missing trees/buildings,
+ground reflection and the editable pattern approximation limit accuracy.
+

@@ -3,6 +3,17 @@ import math
 from antenna_patterns import pattern_settings
 
 
+def polarized_path_loss(cfg, evaluate):
+    """Require both H/V channels for dual mode; never add diversity/stream gain."""
+    polarizations = cfg.get("itm_polarizations", [cfg.get("itm_pol", 1)])
+    if not polarizations or any(pol not in (0, 1) for pol in polarizations):
+        raise ValueError("ITM polarizations must contain H (0) and/or V (1).")
+    losses = [float(evaluate(pol)) for pol in polarizations]
+    if not all(math.isfinite(loss) for loss in losses):
+        raise ValueError("Non-finite polarization path loss.")
+    return max(losses)
+
+
 def microwave_radio(values):
     limits = {
         "frequency_ghz": (1, 10), "tx_power_dbm": (0, 80),
@@ -17,8 +28,8 @@ def microwave_radio(values):
         if not math.isfinite(parsed[key]) or not low <= parsed[key] <= high:
             raise ValueError(f"{key.replace('_', ' ')} must be between {low} and {high}.")
     pol = values["polarization"]
-    if pol not in ("Horizontal", "Vertical"):
-        raise ValueError("Choose Horizontal or Vertical polarization.")
+    if pol not in ("Horizontal", "Vertical", "Dual (H + V)"):
+        raise ValueError("Choose Horizontal, Vertical or Dual (H + V) polarization.")
     radio = {
         "freq_mhz": parsed["frequency_ghz"] * 1000,
         "tx_power_dbm": parsed["tx_power_dbm"],
@@ -32,6 +43,8 @@ def microwave_radio(values):
         "operational_reserve_db": parsed["reserve_db"],
         "max_path_loss_db": parsed["path_loss_cap_db"],
         "itm_pol": int(pol == "Vertical"),
+        "polarization_mode": pol,
+        "itm_polarizations": [0, 1] if pol == "Dual (H + V)" else [int(pol == "Vertical")],
         "sampling_mode": "microwave",
         "loss_sample_spacing_m": parsed["loss_sample_spacing_m"],
     }
@@ -39,3 +52,4 @@ def microwave_radio(values):
     radio["tx_antenna_preset"] = str(values.get("tx_antenna_preset", "Uniform / manual"))
     radio["rx_antenna_preset"] = str(values.get("rx_antenna_preset", "Uniform / manual"))
     return radio
+
